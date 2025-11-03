@@ -17,7 +17,7 @@ void signal_handler(int signum) {
 
 int main() {
     printf("╔════════════════════════════════════════╗\n");
-    printf("║    NAMING SERVER (NS) STARTED         ║\n");
+    printf("║    NAMING SERVER (NS) STARTED          ║\n");
     printf("╚════════════════════════════════════════╝\n\n");
 
     // Set up signal handlers for graceful shutdown
@@ -63,30 +63,18 @@ int main() {
                client_conn.ip_address, client_conn.port);
         printf("═══════════════════════════════════════════\n");
 
-        // Set a timeout for the client socket to avoid hanging
-        set_socket_timeout(client_fd, 5);  // 5 second timeout
-        
-        // Handle client messages
+        // Handle client messages (keep connection open for multiple messages)
         char buffer[BUFFER_SIZE];
         bool client_connected = true;
         int message_count = 0;
 
         while (client_connected && running) {
-            // Receive message from client
+            // Receive message from client (blocking, no timeout)
             int bytes_received = recv_message(client_fd, buffer, BUFFER_SIZE);
 
             if (bytes_received == NET_CLOSED) {
                 printf("\n[NS] Client %s:%d disconnected gracefully.\n", 
                        client_conn.ip_address, client_conn.port);
-                client_connected = false;
-                break;
-            }
-
-            if (bytes_received == NET_TIMEOUT) {
-                // Timeout occurred - client likely done sending
-                if (message_count > 0) {
-                    printf("\n[NS] No more messages from client (timeout).\n");
-                }
                 client_connected = false;
                 break;
             }
@@ -117,6 +105,7 @@ int main() {
             }
 
             printf("[NS] ✓ Acknowledgment sent to client\n");
+            printf("[NS] Waiting for next message from client...\n");
         }
 
         // Close client connection
@@ -133,8 +122,8 @@ int main() {
     printf("[NS] Server closed successfully.\n");
     
     printf("\n╔════════════════════════════════════════╗\n");
-    printf("║    NAMING SERVER (NS) STOPPED         ║\n");
-    printf("╚════════════════════════════════════════╝\n");
+    printf("║    NAMING SERVER (NS) STOPPED            ║\n");
+    printf("╚═════════════════════════════════════════╝\n");
 
     return 0;
 }

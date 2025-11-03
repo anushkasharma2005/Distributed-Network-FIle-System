@@ -2,6 +2,8 @@
 
 run_test.sh
 test_ns_client.sh
+test_network.sh
+check_server.sh
 *.o
 *.exe
 *.out
@@ -9,3 +11,4 @@ test_ns_client.sh
 test_*
 ns_server
 ns_test_client
+client_app

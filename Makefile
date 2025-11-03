@@ -18,7 +18,8 @@ SUBDIRS = $(API_C_NS_DIR) $(NS_DIR)
 
 # Client build (client/ has no Makefile) - build at root level
 CLIENT_SRCS := $(wildcard $(CLIENT_DIR)/*.c)
-API_C_NS_SRCS := $(wildcard $(API_C_NS_DIR)/*.c)
+# Only include the API files needed (exclude test files)
+API_C_NS_SRCS := $(API_C_NS_DIR)/networking.c $(API_C_NS_DIR)/client_api.c $(API_C_NS_DIR)/naming_server.c
 CLIENT_BIN := $(CLIENT_DIR)/client_app
 
 # Default target - build all subdirectories
