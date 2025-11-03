@@ -12,7 +12,7 @@ NS_DIR = ns
 SS_DIR = ss
 
 # Subdirectories to build (add more as needed)
-SUBDIRS = $(API_C_NS_DIR)
+SUBDIRS = $(API_C_NS_DIR) $(NS_DIR)
 # Future additions:
 # SUBDIRS = $(API_C_NS_DIR) $(API_C_SS_DIR) $(API_NS_SS_DIR) $(CLIENT_DIR) $(NS_DIR) $(SS_DIR)
 
@@ -46,6 +46,10 @@ api_c_ns:
 	@echo "=== Building api_c_ns ==="
 	@$(MAKE) -C $(API_C_NS_DIR)
 
+ns:
+	@echo "=== Building ns ==="
+	@$(MAKE) -C $(NS_DIR)
+
 # Future targets (uncomment when ready)
 # api_c_ss:
 # 	@$(MAKE) -C $(API_C_SS_DIR)
@@ -69,7 +73,8 @@ help:
 	@echo "  clean        - Clean all build artifacts"
 	@echo "  rebuild      - Clean and rebuild everything"
 	@echo "  api_c_ns     - Build only api_c_ns"
+	@echo "  ns           - Build only ns (naming server)"
 	@echo ""
 	@echo "Current subdirectories: $(SUBDIRS)"
 
-.PHONY: all clean rebuild api_c_ns help
+.PHONY: all clean rebuild api_c_ns ns help

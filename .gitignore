@@ -1,8 +1,11 @@
 .specstory/
 
 run_test.sh
+test_ns_client.sh
 *.o
 *.exe
 *.out
 
 test_*
+ns_server
+ns_test_client
