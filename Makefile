@@ -16,6 +16,11 @@ SUBDIRS = $(API_C_NS_DIR) $(NS_DIR)
 # Future additions:
 # SUBDIRS = $(API_C_NS_DIR) $(API_C_SS_DIR) $(API_NS_SS_DIR) $(CLIENT_DIR) $(NS_DIR) $(SS_DIR)
 
+# Client build (client/ has no Makefile) - build at root level
+CLIENT_SRCS := $(wildcard $(CLIENT_DIR)/*.c)
+API_C_NS_SRCS := $(wildcard $(API_C_NS_DIR)/*.c)
+CLIENT_BIN := $(CLIENT_DIR)/client_app
+
 # Default target - build all subdirectories
 all:
 	@echo "=== Building all components ==="
@@ -25,6 +30,8 @@ all:
 			$(MAKE) -C $$dir || exit 1; \
 		fi; \
 	done
+	@echo "Building client..."
+	$(MAKE) client || exit 1
 	@echo "=== Build complete ==="
 
 # Clean all subdirectories
@@ -36,6 +43,7 @@ clean:
 			$(MAKE) -C $$dir clean; \
 		fi; \
 	done
+	@$(MAKE) clean-client >/dev/null 2>&1 || true
 	@echo "=== Clean complete ==="
 
 # Rebuild everything
@@ -65,6 +73,18 @@ ns:
 #
 # ss:
 # 	@$(MAKE) -C $(SS_DIR)
+
+# Build client executable (root-level)
+client: $(CLIENT_BIN)
+
+$(CLIENT_BIN): $(CLIENT_SRCS) $(API_C_NS_SRCS)
+	@echo "Compiling client and api_c_ns sources..."
+	$(CC) $(CFLAGS) $(CLIENT_SRCS) $(API_C_NS_SRCS) -o $(CLIENT_BIN) -I. $(LDFLAGS)
+	@echo "Client built: $(CLIENT_BIN)"
+
+clean-client:
+	@echo "Cleaning client build..."
+	-@rm -f $(CLIENT_BIN)
 
 # Help target
 help:

@@ -13,24 +13,16 @@ NETWORKING_OBJ = $(NETWORKING_SRC:.c=.o)
 CLIENT_API_OBJ = $(CLIENT_API_SRC:.c=.o)
 SERVER_API_OBJ = $(SERVER_API_SRC:.c=.o)
 
-# Test executables
-TEST_SERVER = test_server
-TEST_CLIENT = test_client
-
-# Default target
-all: $(TEST_SERVER) $(TEST_CLIENT)
+# Default target: build object files for integration
+all: $(NETWORKING_OBJ) $(CLIENT_API_OBJ) $(SERVER_API_OBJ)
 
 # Compile object files
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
-# Build test server
-$(TEST_SERVER): test_server.c $(NETWORKING_OBJ) $(SERVER_API_OBJ)
-	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
-
-# Build test client
-$(TEST_CLIENT): test_client.c $(NETWORKING_OBJ) $(CLIENT_API_OBJ)
-	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
+# (Optional) If you have test_server.c/test_client.c, you can build them
+# by invoking the specific targets. The default 'all' target only builds
+# the reusable object files for use by other components.
 
 # Clean build files
 clean:
