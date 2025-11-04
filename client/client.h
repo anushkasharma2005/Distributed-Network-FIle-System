@@ -10,8 +10,9 @@
 #include <errno.h>
 #include <stdbool.h>
 
+#include "../include/constants.h"
+
 // Configuration
-#define MAX_BUFFER_SIZE 8192
 #define MAX_COMMAND_LENGTH 1024
 #define MAX_FILENAME_LENGTH 256
 #define MAX_USERNAME_LENGTH 64
