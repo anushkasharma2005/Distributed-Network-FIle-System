@@ -7,10 +7,8 @@
 #include <pthread.h>
 #include <signal.h>
 
-// Global flag for graceful shutdown
-volatile sig_atomic_t keep_running = 1;
-
 void signal_handler(int sig) {
+    (void)sig;
     printf("\n[SS] Received signal %d, shutting down...\n", sig);
     keep_running = 0;
 }
