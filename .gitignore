@@ -1,5 +1,5 @@
 .specstory/
-
+.vscode/
 run_test.sh
 test_ns_client.sh
 test_network.sh

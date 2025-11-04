@@ -1,47 +1,22 @@
-#include "../api_c_ns/naming_server.h"
-#include <signal.h>
-#include <stdbool.h>
+#include "conn.h"
+#include "handle_client.h"
 
-#define NS_PORT 9090
-#define BACKLOG 10
-#define BUFFER_SIZE 4096
 
-// Global flag for graceful shutdown
-volatile sig_atomic_t running = 1;
+// Default values (used if .env file is not found or values are missing)
+#define DEFAULT_NS_CLIENT_PORT 9090
+#define DEFAULT_NS_CLIENT_BACKLOG 10
+#define DEFAULT_NS_CLIENT_BUFFER_SIZE 4096
 
-void signal_handler(int signum) {
-    (void)signum;  // Suppress unused parameter warning
-    printf("\n[NS] Received shutdown signal. Cleaning up...\n");
-    running = 0;
-}
 
 int main() {
-    printf("╔════════════════════════════════════════╗\n");
-    printf("║    NAMING SERVER (NS) STARTED          ║\n");
-    printf("╚════════════════════════════════════════╝\n\n");
+    
+    int server_fd = setup_server();
 
-    // Set up signal handlers for graceful shutdown
-    signal(SIGINT, signal_handler);
-    signal(SIGTERM, signal_handler);
-
-    // Initialize naming server
-    printf("[NS] Initializing server on port %d...\n", NS_PORT);
-    int server_fd = init_server(NS_PORT, BACKLOG);
-
-    if (server_fd < 0) {
-        fprintf(stderr, "[NS ERROR] Failed to initialize server: %s\n", get_socket_error());
-        return 1;
-    }
-
-    printf("[NS] Server initialized successfully!\n");
-    printf("[NS] Waiting for client connections...\n");
-    printf("═══════════════════════════════════════════\n\n");
-
-    // Set server socket to non-blocking mode for graceful shutdown
-    set_socket_nonblocking(server_fd);
+    set_socket_nonblocking(server_fd);  // Set server socket to non-blocking mode for graceful shutdown
 
     // Main server loop
     while (running) {
+        
         // Accept incoming client connection
         Connection client_conn;
         int client_fd = accept_connection(server_fd, &client_conn);
@@ -63,67 +38,36 @@ int main() {
                client_conn.ip_address, client_conn.port);
         printf("═══════════════════════════════════════════\n");
 
-        // Handle client messages (keep connection open for multiple messages)
-        char buffer[BUFFER_SIZE];
-        bool client_connected = true;
-        int message_count = 0;
-
-        while (client_connected && running) {
-            // Receive message from client (blocking, no timeout)
-            int bytes_received = recv_message(client_fd, buffer, BUFFER_SIZE);
-
-            if (bytes_received == NET_CLOSED) {
-                printf("\n[NS] Client %s:%d disconnected gracefully.\n", 
-                       client_conn.ip_address, client_conn.port);
-                client_connected = false;
-                break;
-            }
-
-            if (bytes_received < 0) {
-                fprintf(stderr, "[NS ERROR] Failed to receive message: %s\n", get_socket_error());
-                client_connected = false;
-                break;
-            }
-
-            message_count++;
-
-            // Print received message
-            printf("\n┌─ Message #%d from %s:%d ─────────────\n", 
-                   message_count, client_conn.ip_address, client_conn.port);
-            printf("│ Length: %d bytes\n", bytes_received);
-            printf("│ Content: %s\n", buffer);
-            printf("└────────────────────────────────────────\n");
-
-            // Send acknowledgment back to client
-            const char *ack = "ACK: Message received by NS";
-            int bytes_sent = send_message(client_fd, ack);
-
-            if (bytes_sent < 0) {
-                fprintf(stderr, "[NS ERROR] Failed to send acknowledgment: %s\n", get_socket_error());
-                client_connected = false;
-                break;
-            }
-
-            printf("[NS] ✓ Acknowledgment sent to client\n");
-            printf("[NS] Waiting for next message from client...\n");
+        // Allocate memory for thread data
+        ClientThreadData* thread_data = malloc(sizeof(ClientThreadData));
+        if (!thread_data) {
+            fprintf(stderr, "[NS ERROR] Failed to allocate memory for thread data\n");
+            close_socket(client_fd);
+            continue;
         }
 
-        // Close client connection
-        close_socket(client_fd);
-        printf("[NS] Connection with %s:%d closed.\n", 
-               client_conn.ip_address, client_conn.port);
-        printf("═══════════════════════════════════════════\n");
+        thread_data->client_fd = client_fd;
+        thread_data->client_conn = client_conn;
+
+        // Create a new thread to handle this client
+        pthread_t thread_id;
+        int result = pthread_create(&thread_id, NULL, handle_client, thread_data);
+        
+        if (result != 0) {
+            fprintf(stderr, "[NS ERROR] Failed to create thread for client %s:%d: %s\n",
+                    client_conn.ip_address, client_conn.port, strerror(result));
+            close_socket(client_fd);
+            free(thread_data);
+            continue;
+        }
+
+        printf("[NS] Thread %lu created for client %s:%d\n",
+               (unsigned long)thread_id, client_conn.ip_address, client_conn.port);
         printf("[NS] Waiting for next client...\n\n");
     }
 
     // Cleanup
-    printf("\n[NS] Shutting down server...\n");
-    close_server(server_fd);
-    printf("[NS] Server closed successfully.\n");
-    
-    printf("\n╔════════════════════════════════════════╗\n");
-    printf("║    NAMING SERVER (NS) STOPPED            ║\n");
-    printf("╚═════════════════════════════════════════╝\n");
+    shutdown_server(server_fd);
 
     return 0;
 }
