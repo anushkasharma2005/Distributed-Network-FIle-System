@@ -1,5 +1,5 @@
 #include "handle_client.h"
-
+#include "../include/constants.h"
 
 // Client handler function that runs in separate thread
 void* handle_client(void* arg) {
