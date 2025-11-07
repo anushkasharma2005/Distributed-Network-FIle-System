@@ -5,6 +5,7 @@
 #include <netinet/in.h>
 #include <signal.h>
 #include "../include/constants.h"
+# include "../ss/file_structure.h"
 
 // Maximum limits
 #define MAX_CLIENTS 100
@@ -18,25 +19,40 @@ extern volatile sig_atomic_t keep_running;
 // Client-SS operation types
 typedef enum
 {
-    OP_READ,
-    OP_WRITE,
-    OP_STREAM,
-    OP_STOP,
-    OP_ACK,
-    OP_ERROR
+    OP_READ=1,
+    OP_WRITE=2,
+    OP_WRITE_BEGIN = 3,
+    OP_WRITE_UPDATE = 4,
+    OP_WRITE_END = 5,
+    OP_STREAM = 6,
+    OP_UNDO = 7,
+    OP_ACK = 100,
+    OP_ERROR = 101,
+    OP_STOP = 102
 } OperationType;
 
 // Structure for read/write operations
-typedef struct
-{
+typedef struct {
     OperationType op_type;
     char filename[MAX_FILENAME];
+    char username[64];
     int sentence_num;
     int word_index;
     char content[MAX_BUFFER_SIZE];
     int status;
     char error_msg[512];
 } ClientRequest;
+
+// Structure to track active write sessions
+typedef struct WriteSession {
+    int client_fd;
+    char filename[MAX_FILENAME];
+    char username[64];
+    int sentence_num;
+    int is_active;
+    time_t start_time;
+    struct WriteSession *next;
+} WriteSession;
 
 // Structure for client thread data
 typedef struct
@@ -47,6 +63,7 @@ typedef struct
     int client_port;
     pthread_t thread;
     int active;
+    WriteSession *write_session;
 } ClientThreadData;
 
 // Structure for managing multiple client connections
@@ -56,6 +73,9 @@ typedef struct
     int client_count;
     pthread_mutex_t lock;
     char base_path[MAX_FILENAME];
+    FileManager *file_manager;
+    WriteSession *active_sessions;
+    pthread_mutex_t session_lock;
 } ClientManager;
 
 // Function prototypes for Client-SS API
@@ -107,37 +127,26 @@ int ss_send_to_client(int client_fd, ClientRequest *request);
 int ss_receive_from_client(int client_fd, ClientRequest *request);
 
 /**
- * Handle READ operation
- * @param client_fd Client socket file descriptor
- * @param request Client request
- * @param base_path Base storage path
- * @return 0 on success, -1 on error
- */
-int ss_handle_read(int client_fd, ClientRequest *request, const char *base_path);
-
-/**
- * Handle WRITE operation
- * @param client_fd Client socket file descriptor
- * @param request Client request
- * @param base_path Base storage path
- * @return 0 on success, -1 on error
- */
-int ss_handle_write(int client_fd, ClientRequest *request, const char *base_path);
-
-/**
- * Handle STREAM operation
- * @param client_fd Client socket file descriptor
- * @param request Client request
- * @param base_path Base storage path
- * @return 0 on success, -1 on error
- */
-int ss_handle_stream(int client_fd, ClientRequest *request, const char *base_path);
-
-/**
  * Cleanup client thread
  * @param manager Client manager
  * @param thread_id Thread ID to cleanup
  */
 void ss_cleanup_client(ClientManager *manager, int thread_id);
+
+int ss_handle_read(int client_fd, ClientRequest *request, ClientManager *manager);
+int ss_handle_stream(int client_fd, ClientRequest *request, ClientManager *manager);
+
+int ss_handle_write_begin(int client_fd, ClientRequest *request, ClientManager *manager);
+int ss_handle_write_update(int client_fd, ClientRequest *request, ClientManager *manager);
+int ss_handle_write_end(int client_fd, ClientRequest *request, ClientManager *manager);
+int ss_handle_undo(int client_fd, ClientRequest *request, ClientManager *manager);
+
+// Write Session Management
+WriteSession* ss_create_write_session(ClientManager *manager, int client_fd, 
+                                      const char *filename, const char *username, 
+                                      int sentence_num);
+WriteSession* ss_find_write_session(ClientManager *manager, int client_fd);
+void ss_destroy_write_session(ClientManager *manager, int client_fd);
+void ss_cleanup_client_manager(ClientManager *manager);
 
 #endif // CLIENT_SS_CONNECTION_H

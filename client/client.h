@@ -11,6 +11,7 @@
 #include <stdbool.h>
 
 #include "../include/constants.h"
+# include "../api_c_ss/client_ss_connection.h"
 
 // Configuration
 #define MAX_COMMAND_LENGTH 1024
@@ -103,6 +104,8 @@ int send_to_nm(Client *client, const void *data, size_t len);
 int recv_from_nm(Client *client, void *buffer, size_t len);
 int send_to_ss(Client *client, const void *data, size_t len);
 int recv_from_ss(Client *client, void *buffer, size_t len);
+int send_request_to_ss(Client *client, ClientRequest *req);
+int recv_response_from_ss(Client *client, ClientRequest *resp);
 void print_error(int error_code);
 
 #endif // CLIENT_H

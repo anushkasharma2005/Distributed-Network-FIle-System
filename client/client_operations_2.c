@@ -42,9 +42,14 @@ int cmd_stream(Client *client, const char *filename) {
         return ERR_CONNECTION;
     }
 
-    // Request streaming from SS
-    snprintf(request, sizeof(request), "STREAM_FILE %s", filename);
-    if (send_to_ss(client, request, strlen(request)) != SUCCESS) {
+    // Prepare and send stream request using ClientRequest structure
+    ClientRequest req;
+    memset(&req, 0, sizeof(ClientRequest));
+    req.op_type = OP_STREAM;
+    strncpy(req.filename, filename, MAX_FILENAME - 1);
+    strncpy(req.username, client->username, 63);
+
+    if (send_request_to_ss(client, &req) != SUCCESS) {
         client_disconnect_from_ss(client);
         return ERR_CONNECTION;
     }
@@ -53,31 +58,27 @@ int cmd_stream(Client *client, const char *filename) {
     printf("\n--- Streaming: %s ---\n", filename);
     
     while (1) {
-        char word[256];
-        bytes = recv_from_ss(client, word, sizeof(word) - 1);
-        
-        if (bytes <= 0) {
+        ClientRequest resp;
+        if (recv_response_from_ss(client, &resp) != SUCCESS) {
             fprintf(stderr, "\nError: Storage Server disconnected during streaming\n");
             client_disconnect_from_ss(client);
             return ERR_CONNECTION;
         }
         
-        word[bytes] = '\0';
-        
         // Check for STOP signal
-        if (strcmp(word, "STOP") == 0) {
+        if (resp.op_type == OP_STOP) {
             break;
         }
         
         // Check for errors
-        if (strncmp(word, "ERROR", 5) == 0) {
-            fprintf(stderr, "\n%s\n", word);
+        if (resp.op_type == OP_ERROR || resp.status != 0) {
+            fprintf(stderr, "\n%s\n", resp.error_msg);
             client_disconnect_from_ss(client);
             return ERR_SERVER_ERROR;
         }
         
         // Display word
-        printf("%s ", word);
+        printf("%s ", resp.content);
         fflush(stdout);
         
         // Delay for 0.1 seconds
@@ -131,31 +132,34 @@ int cmd_read(Client *client, const char *filename) {
         return ERR_CONNECTION;
     }
 
-    // Request file from SS
-    snprintf(request, sizeof(request), "READ_FILE %s", filename);
-    if (send_to_ss(client, request, strlen(request)) != SUCCESS) {
+    // Prepare and send read request using ClientRequest structure
+    ClientRequest req;
+    memset(&req, 0, sizeof(ClientRequest));
+    req.op_type = OP_READ;
+    strncpy(req.filename, filename, MAX_FILENAME - 1);
+    strncpy(req.username, client->username, 63);
+
+    if (send_request_to_ss(client, &req) != SUCCESS) {
         client_disconnect_from_ss(client);
         return ERR_CONNECTION;
     }
 
     // Receive file content
-    char content[MAX_BUFFER_SIZE];
-    bytes = recv_from_ss(client, content, sizeof(content) - 1);
-    if (bytes <= 0) {
+    ClientRequest resp;
+    if (recv_response_from_ss(client, &resp) != SUCCESS) {
         client_disconnect_from_ss(client);
         return ERR_CONNECTION;
     }
-    content[bytes] = '\0';
 
     // Check for errors
-    if (strncmp(content, "ERROR", 5) == 0) {
-        fprintf(stderr, "%s\n", content);
+    if (resp.status != 0) {
+        fprintf(stderr, "Error: %s\n", resp.error_msg);
         client_disconnect_from_ss(client);
         return ERR_SERVER_ERROR;
     }
 
     // Display content
-    printf("%s\n", content);
+    printf("%s\n", resp.content);
 
     client_disconnect_from_ss(client);
     return SUCCESS;
@@ -201,12 +205,38 @@ int cmd_write(Client *client, const char *filename, int sentence_num) {
         return ERR_CONNECTION;
     }
 
+    // Send WRITE_BEGIN request
+    ClientRequest req;
+    memset(&req, 0, sizeof(ClientRequest));
+    req.op_type = OP_WRITE_BEGIN;
+    strncpy(req.filename, filename, MAX_FILENAME - 1);
+    strncpy(req.username, client->username, 63);
+    req.sentence_num = sentence_num;
+
+    if (send_request_to_ss(client, &req) != SUCCESS) {
+        client_disconnect_from_ss(client);
+        return ERR_CONNECTION;
+    }
+
+    // Receive acknowledgment
+    ClientRequest resp;
+    if (recv_response_from_ss(client, &resp) != SUCCESS) {
+        client_disconnect_from_ss(client);
+        return ERR_CONNECTION;
+    }
+
+    if (resp.status != 0) {
+        fprintf(stderr, "Error: %s\n", resp.error_msg);
+        client_disconnect_from_ss(client);
+        return ERR_SERVER_ERROR;
+    }
+    printf("Write session started: %s\n", resp.error_msg);
+
     // Enter interactive write mode
     printf("Write mode activated. Format: <word_index> <content>\n");
     printf("Type 'ETIRW' to finish and save.\n");
 
     char line[MAX_BUFFER_SIZE];
-    bool first_write = true;
 
     while (1) {
         printf("Client: ");
@@ -221,16 +251,24 @@ int cmd_write(Client *client, const char *filename, int sentence_num) {
 
         // Check for ETIRW (end write)
         if (strcmp(line, "ETIRW") == 0) {
-            // Send end signal to SS
-            snprintf(request, sizeof(request), "WRITE_END %s %d", filename, sentence_num);
-            send_to_ss(client, request, strlen(request));
+            // Send WRITE_END request
+            memset(&req, 0, sizeof(ClientRequest));
+            req.op_type = OP_WRITE_END;
+            strncpy(req.filename, filename, MAX_FILENAME - 1);
+            strncpy(req.username, client->username, 63);
+            req.sentence_num = sentence_num;
+
+            if (send_request_to_ss(client, &req) != SUCCESS) {
+                client_disconnect_from_ss(client);
+                return ERR_CONNECTION;
+            }
 
             // Receive acknowledgment
-            bytes = recv_from_ss(client, response, sizeof(response) - 1);
-            if (bytes > 0) {
-                response[bytes] = '\0';
-                printf("%s\n", response);
+            if (recv_response_from_ss(client, &resp) != SUCCESS) {
+                client_disconnect_from_ss(client);
+                return ERR_CONNECTION;
             }
+            printf("%s\n", resp.error_msg);
             break;
         }
 
@@ -242,32 +280,30 @@ int cmd_write(Client *client, const char *filename, int sentence_num) {
             continue;
         }
 
-        // Send write command to SS
-        if (first_write) {
-            snprintf(request, sizeof(request), "WRITE_START %s %d %d %s", 
-                     filename, sentence_num, word_idx, content);
-            first_write = false;
-        } else {
-            snprintf(request, sizeof(request), "WRITE_CONTINUE %d %s", word_idx, content);
-        }
+        // Send WRITE_UPDATE request
+        memset(&req, 0, sizeof(ClientRequest));
+        req.op_type = OP_WRITE_UPDATE;
+        strncpy(req.filename, filename, MAX_FILENAME - 1);
+        strncpy(req.username, client->username, 63);
+        req.sentence_num = sentence_num;
+        req.word_index = word_idx;
+        strncpy(req.content, content, MAX_BUFFER_SIZE - 1);
 
-        if (send_to_ss(client, request, strlen(request)) != SUCCESS) {
+        if (send_request_to_ss(client, &req) != SUCCESS) {
             client_disconnect_from_ss(client);
             return ERR_CONNECTION;
         }
 
         // Receive acknowledgment
-        bytes = recv_from_ss(client, response, sizeof(response) - 1);
-        if (bytes <= 0) {
+        if (recv_response_from_ss(client, &resp) != SUCCESS) {
             client_disconnect_from_ss(client);
             return ERR_CONNECTION;
         }
-        response[bytes] = '\0';
 
-        if (strncmp(response, "ERROR", 5) == 0) {
-            fprintf(stderr, "%s\n", response);
-            client_disconnect_from_ss(client);
-            return ERR_SERVER_ERROR;
+        if (resp.status != 0) {
+            fprintf(stderr, "Error: %s\n", resp.error_msg);
+        } else {
+            printf("Success: %s\n", resp.error_msg);
         }
     }
 

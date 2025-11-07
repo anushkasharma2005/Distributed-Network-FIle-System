@@ -5,7 +5,7 @@
 // Use api_c_ns client API and networking utilities
 #include "../api_c_ns/client_api.h"
 #include "../api_c_ns/networking.h"
-
+# include "../api_c_ss/client_ss_connection.h"
 // Initialize client structure
 int client_init_struct(Client *client, const char *nm_ip, int nm_port, const char *username)
 {
@@ -130,4 +130,23 @@ int recv_from_ss(Client *client, void *buffer, size_t len)
         return ERR_CONNECTION;
     int r = recv_message(client->ss_socket, (char *)buffer, len);
     return r;
+}
+
+// Helper function to send ClientRequest to SS
+int send_request_to_ss(Client *client, ClientRequest *req) {
+    if (send(client->ss_socket, req, sizeof(ClientRequest), 0) < 0) {
+        perror("Failed to send request to SS");
+        return ERR_CONNECTION;
+    }
+    return SUCCESS;
+}
+
+// Helper function to receive ClientRequest from SS
+int recv_response_from_ss(Client *client, ClientRequest *resp) {
+    int bytes = recv(client->ss_socket, resp, sizeof(ClientRequest), 0);
+    if (bytes <= 0) {
+        perror("Failed to receive response from SS");
+        return ERR_CONNECTION;
+    }
+    return SUCCESS;
 }

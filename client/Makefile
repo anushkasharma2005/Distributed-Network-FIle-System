@@ -18,10 +18,10 @@ $(TARGET): $(CLIENT_SRCS) $(API_OBJS)
 	@echo "Built $(TARGET)"
 
 test_ss: test_ss_connection.c
-    gcc -Wall -Wextra -g -I.. -I../api_c_ss test_ss_connection.c -o test_ss_client
+	gcc -Wall -Wextra -g -I.. -I../api_c_ss test_ss_connection.c -o test_ss_client
 
 clean_test:
-    rm -f test_ss_client
+	rm -f test_ss_client
 
 clean:
 	@echo "Cleaning client..."

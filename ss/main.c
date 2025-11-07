@@ -132,7 +132,7 @@ int main(int argc, char *argv[]) {
     printf("\n[SS] Cleaning up...\n");
     close(client_listen_fd);
     close(ns_sock);
-    pthread_mutex_destroy(&client_manager.lock);
+    ss_cleanup_client_manager(&client_manager);
 
     printf("[SS] Storage Server shutdown complete\n");
     return EXIT_SUCCESS;

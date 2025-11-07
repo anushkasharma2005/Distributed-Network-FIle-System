@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <stddef.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <errno.h>
@@ -61,9 +62,30 @@ int ss_init_client_manager(ClientManager *manager, const char *base_path) {
     memset(manager, 0, sizeof(ClientManager));
     strncpy(manager->base_path, base_path, MAX_FILENAME - 1);
     manager->client_count = 0;
+    manager->active_sessions = NULL;
     
     if (pthread_mutex_init(&manager->lock, NULL) != 0) {
         perror("Mutex initialization failed");
+        return -1;
+    }
+
+    if (pthread_mutex_init(&manager->session_lock, NULL) != 0) {
+        pthread_mutex_destroy(&manager->lock);
+        return -1;
+    }
+
+    // Initialize file manager
+    manager->file_manager = (FileManager *)malloc(sizeof(FileManager));
+    if (!manager->file_manager) {
+        pthread_mutex_destroy(&manager->lock);
+        pthread_mutex_destroy(&manager->session_lock);
+        return -1;
+    }
+
+    if (fm_init(manager->file_manager, base_path, 100) != 0) {
+        free(manager->file_manager);
+        pthread_mutex_destroy(&manager->lock);
+        pthread_mutex_destroy(&manager->session_lock);
         return -1;
     }
 
@@ -106,149 +128,100 @@ int ss_receive_from_client(int client_fd, ClientRequest *request) {
     return 0;
 }
 
-int ss_handle_read(int client_fd, ClientRequest *request, const char *base_path) {
-    char file_path[MAX_FILENAME];
+int ss_handle_read(int client_fd, ClientRequest *request, ClientManager *manager) {
     ClientRequest response;
-    FILE *fp;
-    size_t file_size;
-
-    snprintf(file_path, MAX_FILENAME, "%s/%s", base_path, request->filename);
     
     memset(&response, 0, sizeof(ClientRequest));
     response.op_type = OP_ACK;
     strncpy(response.filename, request->filename, MAX_FILENAME - 1);
 
-    // Open file for reading
-    fp = fopen(file_path, "r");
-    if (!fp) {
+    // Get or load file structure
+    FileStructure *fs = fm_get_or_create_file(manager->file_manager, 
+                                               request->filename, 
+                                               request->username);
+    if (!fs) {
         response.status = -1;
-        snprintf(response.error_msg, 512, "Failed to open file: %s", strerror(errno));
+        snprintf(response.error_msg, 512, "Failed to load file");
         ss_send_to_client(client_fd, &response);
         return -1;
     }
 
-    // Get file size
-    fseek(fp, 0, SEEK_END);
-    file_size = ftell(fp);
-    fseek(fp, 0, SEEK_SET);
-
     // Read file content
-    if (file_size > 0 && file_size < MAX_BUFFER_SIZE) {
-        size_t read_size = fread(response.content, 1, file_size, fp);
-        response.content[read_size] = '\0';
-        response.status = 0;
-    } else if (file_size >= MAX_BUFFER_SIZE) {
+    if (fs_read_all(fs, response.content, MAX_BUFFER_SIZE) == NULL) {
         response.status = -1;
-        snprintf(response.error_msg, 512, "File too large");
+        snprintf(response.error_msg, 512, "Failed to read file");
     } else {
-        response.content[0] = '\0';
         response.status = 0;
     }
 
-    fclose(fp);
-
-    // Send response
-    if (ss_send_to_client(client_fd, &response) < 0) {
-        return -1;
-    }
-
+    ss_send_to_client(client_fd, &response);
     printf("[SS] READ completed for file: %s\n", request->filename);
     return 0;
 }
 
-int ss_handle_write(int client_fd, ClientRequest *request, const char *base_path) {
-    char file_path[MAX_FILENAME];
+int ss_handle_stream(int client_fd, ClientRequest *request, ClientManager *manager) {
     ClientRequest response;
     
-    snprintf(file_path, MAX_FILENAME, "%s/%s", base_path, request->filename);
-    
-    memset(&response, 0, sizeof(ClientRequest));
-    response.op_type = OP_ACK;
-    strncpy(response.filename, request->filename, MAX_FILENAME - 1);
-
-    // For this simplified version, we'll append to the file
-    // In the full implementation, you'll need sentence-level editing
-    FILE *fp = fopen(file_path, "a");
-    if (!fp) {
-        response.status = -1;
-        snprintf(response.error_msg, 512, "Failed to open file: %s", strerror(errno));
-        ss_send_to_client(client_fd, &response);
-        return -1;
-    }
-
-    fprintf(fp, "%s", request->content);
-    fclose(fp);
-
-    response.status = 0;
-    snprintf(response.error_msg, 512, "Write successful");
-
-    if (ss_send_to_client(client_fd, &response) < 0) {
-        return -1;
-    }
-
-    printf("[SS] WRITE completed for file: %s\n", request->filename);
-    return 0;
-}
-
-int ss_handle_stream(int client_fd, ClientRequest *request, const char *base_path) {
-    char file_path[MAX_FILENAME];
-    ClientRequest response;
-    FILE *fp;
-    char word[256];
-    int ch, idx;
-
-    snprintf(file_path, MAX_FILENAME, "%s/%s", base_path, request->filename);
-    
-    fp = fopen(file_path, "r");
-    if (!fp) {
+    // Get file structure
+    FileStructure *fs = fm_get_or_create_file(manager->file_manager, 
+                                               request->filename, 
+                                               request->username);
+    if (!fs) {
         memset(&response, 0, sizeof(ClientRequest));
         response.op_type = OP_ERROR;
         response.status = -1;
-        snprintf(response.error_msg, 512, "Failed to open file: %s", strerror(errno));
+        snprintf(response.error_msg, 512, "Failed to load file");
         ss_send_to_client(client_fd, &response);
         return -1;
     }
 
     printf("[SS] Starting STREAM for file: %s\n", request->filename);
 
-    // Stream word by word
-    idx = 0;
-    while ((ch = fgetc(fp)) != EOF) {
-        if (ch == ' ' || ch == '\n' || ch == '\t') {
-            if (idx > 0) {
-                word[idx] = '\0';
-                
-                // Send word
-                memset(&response, 0, sizeof(ClientRequest));
-                response.op_type = OP_ACK;
-                response.status = 0;
-                strncpy(response.content, word, MAX_BUFFER_SIZE - 1);
-                
-                if (ss_send_to_client(client_fd, &response) < 0) {
-                    fclose(fp);
-                    return -1;
-                }
-                
-                // 0.1 second delay
-                usleep(100000);
-                idx = 0;
+    // Acquire read lock
+    pthread_rwlock_rdlock(&fs->file_lock);
+
+    SentenceNode *current_sentence = fs->sentences;
+    while (current_sentence && keep_running) {
+        pthread_rwlock_rdlock(&current_sentence->lock);
+        
+        WordNode *current_word = current_sentence->words;
+        while (current_word && keep_running) {
+            memset(&response, 0, sizeof(ClientRequest));
+            response.op_type = OP_ACK;
+            response.status = 0;
+            strncpy(response.content, current_word->word, MAX_BUFFER_SIZE - 1);
+            
+            if (ss_send_to_client(client_fd, &response) < 0) {
+                pthread_rwlock_unlock(&current_sentence->lock);
+                pthread_rwlock_unlock(&fs->file_lock);
+                return -1;
             }
-        } else {
-            if (idx < 255) {
-                word[idx++] = ch;
-            }
+            
+            usleep(100000); // 0.1 second delay
+            current_word = current_word->next;
         }
+
+        // Send delimiter as a word if needed
+        if (current_sentence->delimiter && keep_running) {
+            char delim_str[2] = {current_sentence->delimiter, '\0'};
+            memset(&response, 0, sizeof(ClientRequest));
+            response.op_type = OP_ACK;
+            response.status = 0;
+            strncpy(response.content, delim_str, MAX_BUFFER_SIZE - 1);
+            
+            if (ss_send_to_client(client_fd, &response) < 0) {
+                pthread_rwlock_unlock(&current_sentence->lock);
+                pthread_rwlock_unlock(&fs->file_lock);
+                return -1;
+            }
+            usleep(100000);
+        }
+
+        pthread_rwlock_unlock(&current_sentence->lock);
+        current_sentence = current_sentence->next;
     }
 
-    // Send last word if exists
-    if (idx > 0) {
-        word[idx] = '\0';
-        memset(&response, 0, sizeof(ClientRequest));
-        response.op_type = OP_ACK;
-        response.status = 0;
-        strncpy(response.content, word, MAX_BUFFER_SIZE - 1);
-        ss_send_to_client(client_fd, &response);
-    }
+    pthread_rwlock_unlock(&fs->file_lock);
 
     // Send STOP signal
     memset(&response, 0, sizeof(ClientRequest));
@@ -256,15 +229,50 @@ int ss_handle_stream(int client_fd, ClientRequest *request, const char *base_pat
     response.status = 0;
     ss_send_to_client(client_fd, &response);
 
-    fclose(fp);
     printf("[SS] STREAM completed for file: %s\n", request->filename);
     return 0;
 }
 
+int ss_handle_undo(int client_fd, ClientRequest *request, ClientManager *manager) {
+    ClientRequest response;
+    
+    memset(&response, 0, sizeof(ClientRequest));
+    response.op_type = OP_ACK;
+    strncpy(response.filename, request->filename, MAX_FILENAME - 1);
+
+    // Get file structure
+    FileStructure *fs = fm_get_file(manager->file_manager, request->filename);
+    if (!fs) {
+        response.status = -1;
+        snprintf(response.error_msg, 512, "File not found");
+        ss_send_to_client(client_fd, &response);
+        return -1;
+    }
+
+    // Perform undo
+    int result = fs_undo(fs, manager->base_path);
+    
+    if (result != 0) {
+        response.status = -1;
+        snprintf(response.error_msg, 512, "Undo failed - no snapshot available");
+    } else {
+        response.status = 0;
+        snprintf(response.error_msg, 512, "Undo successful");
+    }
+
+    ss_send_to_client(client_fd, &response);
+    printf("[SS] UNDO completed for file: %s\n", request->filename);
+    return 0;
+}
+
+// ==================== Client Handler Thread ====================
+
 void *ss_client_handler(void *arg) {
     ClientThreadData *thread_data = (ClientThreadData *)arg;
     ClientRequest request;
-    ClientManager *manager = (ClientManager *)thread_data; // Note: You'll need to pass manager properly
+    ClientManager *manager = (ClientManager *)((char *)arg - 
+                              offsetof(ClientManager, clients) - 
+                              thread_data->thread_id * sizeof(ClientThreadData));
     
     printf("[SS] Thread %d: Handling client %s:%d\n", 
            thread_data->thread_id, thread_data->client_ip, thread_data->client_port);
@@ -282,18 +290,27 @@ void *ss_client_handler(void *arg) {
         // Handle request based on operation type
         switch (request.op_type) {
             case OP_READ:
-                ss_handle_read(thread_data->client_fd, &request, 
-                              ((ClientManager *)arg)->base_path);
+                ss_handle_read(thread_data->client_fd, &request, manager);
                 break;
             
-            case OP_WRITE:
-                ss_handle_write(thread_data->client_fd, &request,
-                               ((ClientManager *)arg)->base_path);
+            case OP_WRITE_BEGIN:
+                ss_handle_write_begin(thread_data->client_fd, &request, manager);
+                break;
+            
+            case OP_WRITE_UPDATE:
+                ss_handle_write_update(thread_data->client_fd, &request, manager);
+                break;
+            
+            case OP_WRITE_END:
+                ss_handle_write_end(thread_data->client_fd, &request, manager);
                 break;
             
             case OP_STREAM:
-                ss_handle_stream(thread_data->client_fd, &request,
-                                ((ClientManager *)arg)->base_path);
+                ss_handle_stream(thread_data->client_fd, &request, manager);
+                break;
+            
+            case OP_UNDO:
+                ss_handle_undo(thread_data->client_fd, &request, manager);
                 break;
             
             default:
@@ -302,6 +319,9 @@ void *ss_client_handler(void *arg) {
                 break;
         }
     }
+
+    // Cleanup any active write sessions for this client
+    ss_destroy_write_session(manager, thread_data->client_fd);
 
     // Cleanup
     close(thread_data->client_fd);
@@ -397,4 +417,27 @@ void ss_cleanup_client(ClientManager *manager, int thread_id) {
     }
     
     pthread_mutex_unlock(&manager->lock);
+}
+
+void ss_cleanup_client_manager(ClientManager *manager) {
+    if (!manager) {
+        return;
+    }
+
+    // Cleanup file manager
+    if (manager->file_manager) {
+        fm_cleanup(manager->file_manager);
+        free(manager->file_manager);
+    }
+
+    // Cleanup write sessions
+    WriteSession *session = manager->active_sessions;
+    while (session) {
+        WriteSession *next = session->next;
+        free(session);
+        session = next;
+    }
+
+    pthread_mutex_destroy(&manager->lock);
+    pthread_mutex_destroy(&manager->session_lock);
 }
