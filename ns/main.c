@@ -1,32 +1,60 @@
 #include "conn.h"
 #include "handle_client.h"
+#include "handle_ss.h"
 
-
-// Default values (used if .env file is not found or values are missing)
+// Default values
 #define DEFAULT_NS_CLIENT_PORT 9090
 #define DEFAULT_NS_CLIENT_BACKLOG 10
 #define DEFAULT_NS_CLIENT_BUFFER_SIZE 4096
 
-
 int main() {
     
-    int server_fd = setup_server();
-
-    set_socket_nonblocking(server_fd);  // Set server socket to non-blocking mode for graceful shutdown
-
-    // Main server loop
+    // Setup client server
+    int client_server_fd = setup_server();
+    if (client_server_fd < 0) {
+        fprintf(stderr, "[NS] Failed to setup client server\n");
+        return EXIT_FAILURE;
+    }
+    
+    // Setup Storage Server listener
+    int ss_server_fd = setup_ss_server();
+    if (ss_server_fd < 0) {
+        fprintf(stderr, "[NS] Failed to setup Storage Server listener\n");
+        shutdown_server(client_server_fd);
+        return EXIT_FAILURE;
+    }
+    
+    printf("\n╔════════════════════════════════════════╗\n");
+    printf("║   NAMING SERVER FULLY INITIALIZED      ║\n");
+    printf("╚════════════════════════════════════════╝\n");
+    printf("  Client Port:         %d\n", NS_CLIENT_PORT);
+    printf("  Storage Server Port: %d\n", NS_SS_PORT);
+    printf("═══════════════════════════════════════════\n\n");
+    
+    // Create thread for accepting Storage Server connections
+    pthread_t ss_accept_thread;
+    if (pthread_create(&ss_accept_thread, NULL, accept_storage_servers, &ss_server_fd) != 0) {
+        fprintf(stderr, "[NS] Failed to create SS acceptance thread\n");
+        shutdown_server(client_server_fd);
+        close_socket(ss_server_fd);
+        return EXIT_FAILURE;
+    }
+    
+    printf("[NS] Storage Server acceptance thread created\n");
+    printf("[NS] Now accepting client connections...\n\n");
+    
+    // Main loop for accepting client connections
     while (running) {
         
         // Accept incoming client connection
         Connection client_conn;
-        int client_fd = accept_connection(server_fd, &client_conn);
+        int client_fd = accept_connection(client_server_fd, &client_conn);
 
         if (client_fd < 0) {
-            if (!running) break;  // Exit if shutdown signal received
+            if (!running) break;
             
-            // Check if it's just a non-blocking wait (no client yet)
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                usleep(100000);  // Sleep for 100ms to avoid busy waiting
+                usleep(100000);
                 continue;
             }
             
@@ -67,7 +95,18 @@ int main() {
     }
 
     // Cleanup
-    shutdown_server(server_fd);
+    printf("\n[NS] Initiating shutdown sequence...\n");
     
-    return 0;
+    // Wait for SS thread to finish
+    printf("[NS] Waiting for Storage Server thread to finish...\n");
+    pthread_join(ss_accept_thread, NULL);
+    
+    shutdown_server(client_server_fd);
+    
+    printf("[NS] Giving active threads time to finish...\n");
+    sleep(2);
+    
+    printf("[NS] Shutdown complete\n");
+    
+    return EXIT_SUCCESS;
 }

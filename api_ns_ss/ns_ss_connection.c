@@ -1,3 +1,4 @@
+#include "../api_c_ns/networking.h"
 #include "ns_ss_connection.h"
 #include <stdio.h>
 #include <stdlib.h>

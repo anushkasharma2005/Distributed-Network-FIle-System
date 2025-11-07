@@ -4,9 +4,6 @@
 #include <netinet/in.h>
 #include "../include/constants.h"
 
-// Other limits
-#define MAX_PATH_LEN 256
-#define MAX_FILES 1024
 
 // Message types for NS-SS communication
 typedef enum

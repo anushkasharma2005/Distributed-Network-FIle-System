@@ -7,7 +7,7 @@ LDFLAGS = -pthread
 API_DIR = ../api_c_ns
 
 # Source files
-NS_SRC = main.c conn.c handle_client.c
+NS_SRC = main.c conn.c handle_client.c handle_ss.c
 API_SRC = $(API_DIR)/networking.c $(API_DIR)/naming_server.c
 
 # Object files

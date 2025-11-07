@@ -100,10 +100,11 @@ CFLAGS = -Wall -Wextra -pthread -g -I. -I.. -I../api_ns_ss -I../api_c_ss
 LDFLAGS = -pthread
 
 # Directories
-API_NS_SS_DIR = ../api_ns_ss
-API_C_SS_DIR = ../api_c_ss
 BUILD_DIR = build
 BIN_DIR = bin
+API_NS_SS_DIR = ../api_ns_ss
+API_C_SS_DIR = ../api_c_ss
+API_C_NS_DIR = ../api_c_ns
 
 # Source files from current directory (ss folder)
 SS_LOCAL_SRCS = file_structure_1.c file_structure_2.c main.c
@@ -122,17 +123,17 @@ C_SS_OBJ_2 = $(BUILD_DIR)/client_ss_connection_2.o
 # All object files
 ALL_OBJS = $(SS_LOCAL_OBJS) $(NS_SS_OBJ) $(C_SS_OBJ) $(C_SS_OBJ_2)
 
-# Output binary
-TARGET = $(BIN_DIR)/storage_server
+ALL_OBJ = $(SS_OBJ) $(API_NS_SS_OBJ) $(API_C_SS_OBJ) $(API_C_NS_OBJ)
+
+# Executable
+TARGET = $(BIN_DIR)/ss_server
 
 # Default target
-all: directories $(TARGET)
+all: $(TARGET)
 
-# Create necessary directories
-directories:
-	@mkdir -p $(BUILD_DIR)
-	@mkdir -p $(BIN_DIR)
-	@mkdir -p storage
+# Create directories
+$(BUILD_DIR):
+	mkdir -p $(BUILD_DIR)
 
 # Link object files to create executable
 $(TARGET): $(ALL_OBJS)
@@ -168,7 +169,12 @@ $(C_SS_OBJ_2): $(C_SS_SRC_2) $(API_C_SS_DIR)/client_ss_connection.h
 	@echo "Compiling client_ss_connection_2.c..."
 	$(CC) $(CFLAGS) -c $< -o $@
 
-# Clean build artifacts
+# Compile API C-NS networking source files
+$(BUILD_DIR)/%.o: $(API_C_NS_DIR)/%.c | $(BUILD_DIR)
+	@echo "Compiling $<..."
+	$(CC) $(CFLAGS) -c $< -o $@
+
+# Clean build files
 clean:
 	@echo "Cleaning build artifacts..."
 	rm -rf $(BUILD_DIR)
@@ -186,11 +192,8 @@ run: all
 	@echo "Starting Storage Server..."
 	./$(TARGET)
 
-# Run with custom configuration
-# Usage: make run-custom NS_IP=127.0.0.1 NS_PORT=8080 NM_PORT=9001 CLIENT_PORT=9002
-run-custom: all
-	@echo "Starting Storage Server with custom configuration..."
-	./$(TARGET) $(NS_IP) $(NS_PORT) $(NM_PORT) $(CLIENT_PORT) ./storage
+# Rebuild everything
+rebuild: clean all
 
 # Debug build (with debug symbols and verbose output)
 debug: CFLAGS += -DDEBUG -g3 -O0

@@ -32,9 +32,9 @@ void *ns_communication_thread(void *arg) {
 int main(int argc, char *argv[]) {
     // Configuration
     char ns_ip[16] = "127.0.0.1";
-    int ns_port = 9090;
-    int nm_port = 9001;      // Port for NM connection
-    int client_port = 9002;  // Port for client connections
+    int ns_port = 9091;
+    int nm_port = 9002;      // Port for NM connection
+    int client_port = 9003;  // Port for client connections
     char base_path[256] = "./storage";
     char ss_ip[16] = "127.0.0.1";
     
