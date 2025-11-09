@@ -1,6 +1,12 @@
 #ifndef HANDLE_SS_H
 #define HANDLE_SS_H
 
+
+#include <stdlib.h>
+#include <string.h>
+#include <errno.h>
+#include <unistd.h>
+
 #include "conn.h"
 
 /**

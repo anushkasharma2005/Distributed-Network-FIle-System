@@ -1,4 +1,4 @@
-CC = gcc
+hmmCC = gcc
 CFLAGS = -Wall -Wextra -g
 LDFLAGS = -pthread
 

@@ -60,4 +60,9 @@
 // Default Naming Server port for client connections
 #define DEFAULT_NS_PORT NS_CLIENT_PORT
 
+
+// Maximum number of storage servers and hash table size
+#define MAX_STORAGE_SERVERS 100
+#define HASH_TABLE_SIZE 128  // Should be prime or power of 2
+
 #endif // PROJECT_CONSTANTS_H

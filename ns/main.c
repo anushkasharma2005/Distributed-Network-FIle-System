@@ -1,6 +1,7 @@
 #include "conn.h"
 #include "handle_client.h"
 #include "handle_ss.h"
+#include "ss_registry.h"
 
 // Default values
 #define DEFAULT_NS_CLIENT_PORT 9090
@@ -24,6 +25,12 @@ int main() {
         return EXIT_FAILURE;
     }
     
+    // Initialize SS registry
+    init_ss_registry();
+    printf("[NS] Storage Server registry initialized\n\n");
+
+
+
     printf("\n╔════════════════════════════════════════╗\n");
     printf("║   NAMING SERVER FULLY INITIALIZED      ║\n");
     printf("╚════════════════════════════════════════╝\n");
@@ -100,6 +107,9 @@ int main() {
     // Wait for SS thread to finish
     printf("[NS] Waiting for Storage Server thread to finish...\n");
     pthread_join(ss_accept_thread, NULL);
+    
+    // Cleanup registry
+    cleanup_ss_registry();
     
     shutdown_server(client_server_fd);
     

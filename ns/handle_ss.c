@@ -1,9 +1,8 @@
 #include "handle_ss.h"
 #include "../include/constants.h"
-#include <stdlib.h>
-#include <string.h>
-#include <errno.h>
-#include <unistd.h>
+#include "ss_registry.h"
+
+
 
 // Counter for assigning unique IDs to storage servers
 static int ss_id_counter = 0;
@@ -34,40 +33,99 @@ int setup_ss_server() {
     return server_fd;
 }
 
+
 void* handle_storage_server(void* arg) {
     SSThreadData* data = (SSThreadData*)arg;
     int ss_fd = data->ss_fd;
     Connection ss_conn = data->ss_conn;
-    int ss_id = data->ss_id;
-    
+    int initial_ss_id = data->ss_id;  // CHANGE: may not be final ID
+
     // Free the allocated data structure
     free(data);
     
     // Detach thread so resources are automatically freed
     pthread_detach(pthread_self());
+
+    char buffer[NS_SS_BUFFER_SIZE];
+    int bytes_received = recv_message(ss_fd, buffer, NS_SS_BUFFER_SIZE);
+    
+    if (bytes_received <= 0) {
+        close_socket(ss_fd);
+        return NULL;
+    }
+
+
+    char cmd[32], ss_ip[16];
+    int nm_port, client_port, num_paths;
+    
+    if (sscanf(buffer, "%s %s %d %d %d", cmd, ss_ip, &nm_port, &client_port, &num_paths) != 5) {
+        fprintf(stderr, "[NS-SS ERROR] Invalid registration format\n");
+        close_socket(ss_fd);
+        return NULL;
+    }
+    
+    printf("\n┌─ SS Message #1 from Storage Server (temp %s:%d) ─────\n", 
+           ss_conn.ip_address, ss_conn.port);
+    printf("│ Length: %d bytes\n", bytes_received);
+    printf("│ Content: %s\n", buffer);
+    printf("│ Extracted NM Port: %d ← USING THIS FOR IDENTIFICATION\n", nm_port);
+    printf("└────────────────────────────────────────────────────\n");
+    
+    // NOW register with the CORRECT port
+    StorageServerInfo ss_info = {
+        .ss_id = initial_ss_id,
+        .ss_fd = ss_fd,
+        .nm_port = nm_port,           // ← Use parsed port (9002), not ss_conn.port!
+        .client_port = client_port,
+        .is_active = true,
+        .accessible_paths = NULL,
+        .num_paths = 0,
+        .thread_id = pthread_self()
+    };
+    strncpy(ss_info.ip_address, ss_ip, sizeof(ss_info.ip_address) - 1);
+    
+
+    // Register in hash table
+    int ss_id = register_or_reconnect_storage_server(&ss_info);
+    
+    if (ss_id < 0) {
+        fprintf(stderr, "[NS-SS ERROR] Failed to register SS\n");
+        free(data);
+        close_socket(ss_fd);
+        return NULL;
+    }
+
     
     printf("\n[NS-SS] Thread created for Storage Server #%d (%s:%d)\n", 
            ss_id, ss_conn.ip_address, ss_conn.port);
     
-    // Handle SS messages
-    char buffer[NS_SS_BUFFER_SIZE];
-    bool ss_connected = true;
-    int message_count = 0;
+     
+           
+    // Send ACK
+    const char* ack = "ACK";
+    send_message(ss_fd, ack);
+    printf("[NS-SS] ✓ Acknowledgment sent to Storage Server #%d\n", ss_id);
     
+    // Handle remaining messages
+    bool ss_connected = true;
+    int message_count = 1;  // Already got first message
+    
+
+
     while (ss_connected && running) {
         // Receive message from Storage Server
         int bytes_received = recv_message(ss_fd, buffer, NS_SS_BUFFER_SIZE);
         
         if (bytes_received == NET_CLOSED) {
             printf("\n[NS-SS] Storage Server #%d (%s:%d) disconnected gracefully.\n", 
-                   ss_id, ss_conn.ip_address, ss_conn.port);
+                   ss_id, ss_ip, nm_port);
             ss_connected = false;
             break;
         }
         
         if (bytes_received < 0) {
             fprintf(stderr, "[NS-SS ERROR] Failed to receive message from SS #%d (%s:%d): %s\n",
-                    ss_id, ss_conn.ip_address, ss_conn.port, get_socket_error());
+                    ss_id, ss_ip, nm_port, get_socket_error());
             ss_connected = false;
             break;
         }
@@ -76,7 +134,7 @@ void* handle_storage_server(void* arg) {
         
         // Print received message
         printf("\n┌─ SS Message #%d from Storage Server #%d (%s:%d) ─────\n", 
-               message_count, ss_id, ss_conn.ip_address, ss_conn.port);
+               message_count, ss_id, ss_ip, nm_port);
         printf("│ Length: %d bytes\n", bytes_received);
         printf("│ Content: %s\n", buffer);
         printf("└────────────────────────────────────────────────────\n");
@@ -99,10 +157,13 @@ void* handle_storage_server(void* arg) {
         printf("[NS-SS] ✓ Acknowledgment sent to Storage Server #%d\n", ss_id);
     }
     
-    // Close SS connection
+    // Close SS connection    
+    // On disconnect, unregister
+    mark_ss_inactive(ss_id);
+
     close_socket(ss_fd);
     printf("[NS-SS] Connection with Storage Server #%d (%s:%d) closed.\n", 
-           ss_id, ss_conn.ip_address, ss_conn.port);
+           ss_id, ss_ip, nm_port);
     printf("═══════════════════════════════════════════\n");
     
     return NULL;

@@ -128,12 +128,23 @@ ALL_OBJ = $(SS_OBJ) $(API_NS_SS_OBJ) $(API_C_SS_OBJ) $(API_C_NS_OBJ)
 # Executable
 TARGET = $(BIN_DIR)/ss_server
 
+
+directories:
+	@mkdir -p $(BUILD_DIR)
+	@mkdir -p $(BIN_DIR)
+	@mkdir -p storage
+
+
 # Default target
 all: $(TARGET)
 
 # Create directories
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
+
+
+$(BIN_DIR):
+	mkdir -p $(BIN_DIR)
 
 # Link object files to create executable
 $(TARGET): $(ALL_OBJS)
@@ -142,30 +153,30 @@ $(TARGET): $(ALL_OBJS)
 	@echo "✓ Build complete: $@"
 
 # Compile local SS files
-$(BUILD_DIR)/file_structure_1.o: file_structure_1.c file_structure.h
+$(BUILD_DIR)/file_structure_1.o: file_structure_1.c file_structure.h | $(BUILD_DIR)
 	@echo "Compiling file_structure_1.c..."
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/file_structure_2.o: file_structure_2.c file_structure.h
+$(BUILD_DIR)/file_structure_2.o: file_structure_2.c file_structure.h | $(BUILD_DIR)
 	@echo "Compiling file_structure_2.c..."
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/storage_server_main.o: main.c file_structure.h
+$(BUILD_DIR)/storage_server_main.o: main.c file_structure.h | $(BUILD_DIR)
 	@echo "Compiling main.c..."
 	$(CC) $(CFLAGS) -c $< -o $@
 
 # Compile NS-SS API
-$(NS_SS_OBJ): $(NS_SS_SRC) $(API_NS_SS_DIR)/ns_ss_connection.h
+$(NS_SS_OBJ): $(NS_SS_SRC) $(API_NS_SS_DIR)/ns_ss_connection.h | $(BUILD_DIR)
 	@echo "Compiling ns_ss_connection.c..."
 	$(CC) $(CFLAGS) -c $< -o $@
 
 # Compile Client-SS API (main file)
-$(C_SS_OBJ): $(C_SS_SRC) $(API_C_SS_DIR)/client_ss_connection.h
+$(C_SS_OBJ): $(C_SS_SRC) $(API_C_SS_DIR)/client_ss_connection.h | $(BUILD_DIR)
 	@echo "Compiling client_ss_connection.c..."
 	$(CC) $(CFLAGS) -c $< -o $@
 
 # Compile Client-SS API (secondary file)
-$(C_SS_OBJ_2): $(C_SS_SRC_2) $(API_C_SS_DIR)/client_ss_connection.h
+$(C_SS_OBJ_2): $(C_SS_SRC_2) $(API_C_SS_DIR)/client_ss_connection.h | $(BUILD_DIR)
 	@echo "Compiling client_ss_connection_2.c..."
 	$(CC) $(CFLAGS) -c $< -o $@
 
