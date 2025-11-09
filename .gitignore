@@ -9,7 +9,7 @@ check_server.sh
 *.out
 
 test_*
-ns_server
+/ns/ns_server
 ns_test_client
 client_app
 
