@@ -21,7 +21,7 @@ typedef enum
 typedef struct
 {
     char path[MAX_PATH_LEN];
-} FileInfo;
+} SSFileInfo;
 
 // Structure for SS registration data
 typedef struct
@@ -30,7 +30,7 @@ typedef struct
     int nm_port;     // Port for NM connection
     int client_port; // Port for client connections
     int file_count;
-    FileInfo files[MAX_FILES];
+    SSFileInfo files[MAX_FILES];
 } SSRegistrationData;
 
 // Structure for message protocol

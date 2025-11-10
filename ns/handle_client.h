@@ -22,4 +22,15 @@ typedef struct {
  */
 void* handle_client(void* arg);
 
+
+/**
+ * Thread function to accept incoming client connections
+ * Creates a new thread for each client using handle_client()
+ * @param arg Pointer to client server file descriptor (int*)
+ * @return NULL
+ */
+void* accept_clients(void* arg);
+
+
+
 #endif // HANDLE_CLIENT_H

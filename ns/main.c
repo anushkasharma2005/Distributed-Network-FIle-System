@@ -2,11 +2,14 @@
 #include "handle_client.h"
 #include "handle_ss.h"
 #include "ss_registry.h"
+#include "file_registry.h" 
+#include "../include/constants.h"
 
 // Default values
 #define DEFAULT_NS_CLIENT_PORT 9090
 #define DEFAULT_NS_CLIENT_BACKLOG 10
 #define DEFAULT_NS_CLIENT_BUFFER_SIZE 4096
+
 
 int main() {
     
@@ -27,7 +30,11 @@ int main() {
     
     // Initialize SS registry
     init_ss_registry();
-    printf("[NS] Storage Server registry initialized\n\n");
+    init_file_registry();
+
+
+    printf("[NS] Storage Server registry initialized\n");
+    printf("[NS] File registry initialized\n\n");
 
 
 
@@ -38,6 +45,8 @@ int main() {
     printf("  Storage Server Port: %d\n", NS_SS_PORT);
     printf("═══════════════════════════════════════════\n\n");
     
+
+
     // Create thread for accepting Storage Server connections
     pthread_t ss_accept_thread;
     if (pthread_create(&ss_accept_thread, NULL, accept_storage_servers, &ss_server_fd) != 0) {
@@ -47,69 +56,48 @@ int main() {
         return EXIT_FAILURE;
     }
     
+
+    printf("═══════════════════════════════════════════\n");
     printf("[NS] Storage Server acceptance thread created\n");
-    printf("[NS] Now accepting client connections...\n\n");
-    
-    // Main loop for accepting client connections
-    while (running) {
-        
-        // Accept incoming client connection
-        Connection client_conn;
-        int client_fd = accept_connection(client_server_fd, &client_conn);
+    printf("[NS] Now accepting client connections...\n");
+    printf("═══════════════════════════════════════════\n\n");
 
-        if (client_fd < 0) {
-            if (!running) break;
-            
-            if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                usleep(100000);
-                continue;
-            }
-            
-            fprintf(stderr, "[NS ERROR] Failed to accept connection: %s\n", get_socket_error());
-            continue;
-        }
 
-        printf("\n[NS] ✓ New client connected from %s:%d\n", 
-               client_conn.ip_address, client_conn.port);
-        printf("═══════════════════════════════════════════\n");
-
-        // Allocate memory for thread data
-        ClientThreadData* thread_data = malloc(sizeof(ClientThreadData));
-        if (!thread_data) {
-            fprintf(stderr, "[NS ERROR] Failed to allocate memory for thread data\n");
-            close_socket(client_fd);
-            continue;
-        }
-
-        thread_data->client_fd = client_fd;
-        thread_data->client_conn = client_conn;
-
-        // Create a new thread to handle this client
-        pthread_t thread_id;
-        int result = pthread_create(&thread_id, NULL, handle_client, thread_data);
-        
-        if (result != 0) {
-            fprintf(stderr, "[NS ERROR] Failed to create thread for client %s:%d: %s\n",
-                    client_conn.ip_address, client_conn.port, strerror(result));
-            close_socket(client_fd);
-            free(thread_data);
-            continue;
-        }
-
-        printf("[NS] Thread %lu created for client %s:%d\n",
-               (unsigned long)thread_id, client_conn.ip_address, client_conn.port);
-        printf("[NS] Waiting for next client...\n\n");
+    // Create thread for accepting Client connections
+    pthread_t client_accept_thread;
+    if (pthread_create(&client_accept_thread, NULL, accept_clients, &client_server_fd) != 0) {
+        fprintf(stderr, "[NS] Failed to create client acceptance thread\n");
+        shutdown_server(client_server_fd);
+        close_socket(ss_server_fd);
+        // Signal SS thread to stop
+        running = 0;
+        pthread_join(ss_accept_thread, NULL);
+        return EXIT_FAILURE;
     }
+    
+    printf("═══════════════════════════════════════════\n");
+    printf("[NS] Client acceptance thread created\n");
+    printf("[NS] All systems operational\n");
+    printf("═══════════════════════════════════════════\n\n");
+    
+    
 
-    // Cleanup
-    printf("\n[NS] Initiating shutdown sequence...\n");
+
     
     // Wait for SS thread to finish
-    printf("[NS] Waiting for Storage Server thread to finish...\n");
+    printf("[NS] Waiting for Client and Storage Server  thread to finish...\n");
     pthread_join(ss_accept_thread, NULL);
+    pthread_join(client_accept_thread, NULL);
+    
+    // Cleanup
+    printf("\n[NS] Initiating shutdown sequence...\n");
+
+
     
     // Cleanup registry
     cleanup_ss_registry();
+    cleanup_file_registry();
+
     
     shutdown_server(client_server_fd);
     

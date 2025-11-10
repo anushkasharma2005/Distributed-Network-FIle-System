@@ -9,6 +9,7 @@ static int ss_id_counter = 0;
 static pthread_mutex_t ss_id_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 int setup_ss_server() {
+    printf("═══════════════════════════════════════════\n");
     printf("\n[NS-SS] Storage Server Listener Configuration:\n");
     printf("     - NS_SS_PORT: %d\n", NS_SS_PORT);
     printf("     - NS_SS_BACKLOG: %d\n", NS_SS_BACKLOG);
@@ -174,6 +175,7 @@ void* accept_storage_servers(void* arg) {
     
     pthread_detach(pthread_self());
     
+    printf("═══════════════════════════════════════════\n");
     printf("[NS-SS] Storage Server acceptance thread started\n");
     printf("═══════════════════════════════════════════\n\n");
     
@@ -200,10 +202,12 @@ void* accept_storage_servers(void* arg) {
         int ss_id = ++ss_id_counter;
         pthread_mutex_unlock(&ss_id_mutex);
         
+
         printf("\n[NS-SS] ✓ New Storage Server #%d connected from %s:%d\n", 
                ss_id, ss_conn.ip_address, ss_conn.port);
         printf("═══════════════════════════════════════════\n");
         
+
         // Allocate memory for thread data
         SSThreadData* thread_data = malloc(sizeof(SSThreadData));
         if (!thread_data) {
@@ -228,9 +232,12 @@ void* accept_storage_servers(void* arg) {
             continue;
         }
         
+
         printf("[NS-SS] Thread %lu created for Storage Server #%d\n",
                (unsigned long)thread_id, ss_id);
-        printf("[NS-SS] Waiting for next Storage Server...\n\n");
+        printf("[NS-SS] Waiting for next Storage Server...\n");
+        printf("═══════════════════════════════════════════\n\n");
+
     }
     
     printf("[NS-SS] Storage Server acceptance thread shutting down...\n");

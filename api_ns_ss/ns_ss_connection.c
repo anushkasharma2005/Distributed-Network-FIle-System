@@ -9,6 +9,8 @@
 #include <dirent.h>
 #include <errno.h>
 #include <sys/stat.h>
+#include <arpa/inet.h>
+
 
 int ss_connect_to_ns(const char *ns_ip, int ns_port)
 {
@@ -192,85 +194,105 @@ int ss_handle_ns_commands(int sock_fd, const char *base_path)
 
     while (1)
     {
-        // Receive command from NS
         if (ss_receive_message(sock_fd, &msg) < 0)
         {
             fprintf(stderr, "[SS] Connection to NS lost\n");
             return -1;
         }
 
-        // Prepare response
+        // DEBUG: Print what we received
+        
+        printf("[DEBUG SS] Received ProtocolMessage:\n");
+        printf("  - sizeof(ProtocolMessage) = %zu bytes\n", sizeof(ProtocolMessage));
+        printf("  - msg.type (raw) = %d (hex: 0x%08x)\n", msg.type, msg.type);
+        printf("  - msg.status (raw) = %d (hex: 0x%08x)\n", msg.status, msg.status);
+        printf("  - msg.data = '%s' (length: %zu)\n", msg.data, strlen(msg.data));
+        printf("  - msg.message = '%s'\n", msg.message);
+        printf("  - First 32 bytes of data field (hex): ");
+        for (int i = 0; i < 32 && i < (int)sizeof(msg.data); i++) {
+            printf("%02x ", (unsigned char)msg.data[i]);
+        }
+        printf("\n");
+        
+        // CONVERT FROM NETWORK BYTE ORDER
+        int command_type = ntohl(msg.type);
+        
+        printf("[DEBUG SS] After ntohl:\n");
+        printf("  - command_type = %d\n", command_type);
+        printf("  - Expected MSG_CREATE_FILE = %d\n", MSG_CREATE_FILE);
+        printf("  - Expected MSG_DELETE_FILE = %d\n", MSG_DELETE_FILE);
+        
+        printf("[SS] Received command type: %d, data: %s\n", 
+               command_type, msg.data);
         memset(&response, 0, sizeof(ProtocolMessage));
-        response.type = MSG_FILE_OP_ACK;
+        response.type = htonl(MSG_FILE_OP_ACK);
 
-        switch (msg.type)
+        switch (command_type)
         {
         case MSG_CREATE_FILE:
         {
-            // Extract filename from message data
             snprintf(file_path, MAX_PATH_LEN, "%s/%s", base_path, msg.data);
 
             FILE *fp = fopen(file_path, "w");
             if (fp)
             {
                 fclose(fp);
-                response.status = 0;
+                response.status = htonl(0);
                 snprintf(response.message, MAX_BUFFER_SIZE,
-                         "File created: %s", msg.data);
-                printf("[SS] Created file: %s\n", file_path);
+                         "SUCCESS: File created: %s", msg.data);
+                printf("[SS] ✓ Created file: %s\n", file_path);
             }
             else
             {
-                response.status = -1;
+                response.status = htonl(-1);
                 snprintf(response.message, MAX_BUFFER_SIZE,
-                         "Failed to create file: %s", strerror(errno));
-                fprintf(stderr, "[SS] Failed to create file: %s\n", file_path);
+                         "ERROR: Failed to create file: %s", strerror(errno));
+                fprintf(stderr, "[SS] ✗ Failed to create: %s\n", file_path);
             }
             break;
         }
 
         case MSG_DELETE_FILE:
         {
-            // Extract filename from message data
             snprintf(file_path, MAX_PATH_LEN, "%s/%s", base_path, msg.data);
 
             if (unlink(file_path) == 0)
             {
-                response.status = 0;
+                response.status = htonl(0);
                 snprintf(response.message, MAX_BUFFER_SIZE,
-                         "File deleted: %s", msg.data);
-                printf("[SS] Deleted file: %s\n", file_path);
+                         "SUCCESS: File deleted: %s", msg.data);
+                printf("[SS] ✓ Deleted: %s\n", file_path);
             }
             else
             {
-                response.status = -1;
+                response.status = htonl(-1);
                 snprintf(response.message, MAX_BUFFER_SIZE,
-                         "Failed to delete file: %s", strerror(errno));
-                fprintf(stderr, "[SS] Failed to delete file: %s\n", file_path);
+                         "ERROR: Failed to delete: %s", strerror(errno));
+                fprintf(stderr, "[SS] ✗ Failed to delete: %s\n", file_path);
             }
             break;
         }
 
         case MSG_HEARTBEAT:
-            // Respond to heartbeat
-            response.type = MSG_HEARTBEAT;
-            response.status = 0;
+            response.type = htonl(MSG_HEARTBEAT);
+            response.status = htonl(0);
             strcpy(response.message, "Alive");
             break;
 
         default:
-            response.status = -1;
+            response.status = htonl(-1);
             snprintf(response.message, MAX_BUFFER_SIZE,
-                     "Unknown command type: %d", msg.type);
-            fprintf(stderr, "[SS] Unknown command type: %d\n", msg.type);
+                     "ERROR: Unknown command: %d", command_type);
+            fprintf(stderr, "[SS] Unknown command: %d\n", command_type);
         }
 
-        // Send response back to NS
         if (ss_send_message(sock_fd, &response) < 0)
         {
-            fprintf(stderr, "[SS] Failed to send response to NS\n");
+            fprintf(stderr, "[SS] Failed to send response\n");
             return -1;
         }
+        
+        printf("[SS] Response sent (status: %d)\n", ntohl(response.status));
     }
 
     return 0;

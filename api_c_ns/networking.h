@@ -15,7 +15,7 @@
 
 
 
-// Connection structure to hold socket information
+// Connection structure to hold socket information of the peer requesting connection
 typedef struct {
     int socket_fd;
     struct sockaddr_in address;
