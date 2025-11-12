@@ -31,6 +31,10 @@ void* handle_client(void* arg);
  */
 void* accept_clients(void* arg);
 
-
+/**
+ * Setup and initialize the client server for handling client connections
+ * @return Server socket file descriptor on success, -1 on failure
+ */
+int setup_client_server();
 
 #endif // HANDLE_CLIENT_H

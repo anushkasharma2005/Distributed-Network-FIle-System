@@ -14,7 +14,31 @@
 #define MSG_FILE_OP_ACK 3
 
 
+int setup_client_server() {
+    printf("═══════════════════════════════════════════\n");
+    printf("\n[NS-Client] Client Listener Configuration:\n");
+    printf("     - NS_CLIENT_PORT: %d\n", NS_CLIENT_PORT);
+    printf("     - NS_CLIENT_BACKLOG: %d\n", NS_CLIENT_BACKLOG);
+    printf("     - NS_CLIENT_BUFFER_SIZE: %d\n\n", NS_CLIENT_BUFFER_SIZE);
+    
+    // Initialize server socket for Storage Servers
+    printf("[NS-SS] Initializing Storage Server listener on port %d...\n", NS_SS_PORT);
+    int server_fd = init_server(NS_CLIENT_PORT, NS_CLIENT_BACKLOG);
 
+    if (server_fd < 0) {
+        fprintf(stderr, "[NS-Client ERROR] Failed to initialize Client server: %s\n", get_socket_error());
+        return -1;
+    }
+
+    printf("[NS-Client] Client listener initialized successfully!\n");
+    printf("[NS-Client] Waiting for Client connections...\n");
+    printf("═══════════════════════════════════════════\n\n");
+    
+    // Set to non-blocking mode
+    set_socket_nonblocking(server_fd);
+    
+    return server_fd;
+}
 
 // ADD THIS DEBUG:
 static void print_protocol_message_layout(void) {

@@ -18,9 +18,9 @@ typedef struct {
     int nm_port;                    // Port for NS-SS communication
     int client_port;                // Port for client-SS communication
     bool is_active;                 // Connection status
-    char **accessible_paths;        // Array of accessible paths
-    int num_paths;                  // Number of paths
-    pthread_t thread_id;            // Handler thread ID
+    char **accessible_paths;        // Array of accessible paths. asccessible strings are just file paths
+    int num_paths;                  // Number of paths of files stored
+    pthread_t thread_id;            // Handler thread ID, id of the thread managing this SS
     time_t first_connected;         // Time when the server first connected
     time_t last_connected;          // Time when the server last connected
     int reconnect_count;            // Number of reconnections

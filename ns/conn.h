@@ -8,6 +8,20 @@
 #include <ctype.h>
 #include <pthread.h>
 
+
+#include "handle_client.h"
+#include "handle_ss.h"
+#include "ss_registry.h"
+#include "file_registry.h"
+#include "../include/constants.h"
+
+
+typedef struct {
+    int client_server_fd;
+    int ss_server_fd;
+} ServerFDs;
+
+
 // Global flag for graceful shutdown
 extern volatile sig_atomic_t running;
 
@@ -16,20 +30,15 @@ extern volatile sig_atomic_t running;
  * Uses configuration from constants.h and creates server socket
  * @return Server socket file descriptor on success, -1 on failure
  */
-int setup_server();
+ServerFDs setup_server();
 
 /**
  * Shutdown the naming server gracefully
  * Closes server socket and displays shutdown message
  * @param server_fd Server socket file descriptor to close
  */
-void shutdown_server(int server_fd);
+void shutdown_main_server(ServerFDs fds);
 
-/**
- * Display starting message with server configuration
- * Shows NS_CLIENT_PORT, NS_CLIENT_BACKLOG, and NS_CLIENT_BUFFER_SIZE
- */
-void starting_msg();
 
 /**
  * Setup signal handlers for graceful shutdown
@@ -43,5 +52,19 @@ void setup_signal_handlers();
  * @param signum Signal number received
  */
 void signal_handler(int signum);
+
+
+/**
+ * Create threads for accepting client and storage server connections
+ * @param fds Pointer to ServerFDs structure containing server FDs
+ * @return 0 on success, -1 on failure
+ */
+int create_acceptance_threads(ServerFDs *fds);
+
+/**
+ * Shutdown the specified server
+ * @param server_fd Server socket file descriptor to close
+ */
+void shutdown_server(int server_fd);
 
 #endif // CONN_H
