@@ -73,15 +73,12 @@ void* accept_storage_servers(void* arg) {
             continue;
         }
         
-        // Assign unique ID to this Storage Server
-        pthread_mutex_lock(&ss_id_mutex);
-        int ss_id = ++ss_id_counter;
-        pthread_mutex_unlock(&ss_id_mutex);
-        
-        printf("════════════════════════════════════════════════════════\n");
-        printf(" [NS-SS] ✓ New Storage Server #%d connected from %s:%d \n", 
-            ss_id, ss_conn.ip_address, ss_conn.port);
-        printf("════════════════════════════════════════════════════════\n");
+
+        printf("════════════════════════════════════════════════════════════════\n");
+        printf(" [NS-SS] ✓ New connection from %s:%d (pending identification)\n", 
+            ss_conn.ip_address, ss_conn.port);
+        printf("════════════════════════════════════════════════════════════════\n");
+
 
         // Allocate memory for thread data structure 
         SSThreadData* thread_data = malloc(sizeof(SSThreadData));
@@ -93,22 +90,20 @@ void* accept_storage_servers(void* arg) {
         
         thread_data->ss_fd = ss_fd;
         thread_data->ss_conn = ss_conn;
-        thread_data->ss_id = ss_id;
+        thread_data->ss_id = -1;  // Temporary ID, will be assigned upon registration
         
         // Create a new thread to handle this Storage Server
         pthread_t thread_id;
         int result = pthread_create(&thread_id, NULL, handle_storage_server, thread_data);
         
         if (result != 0) {
-            fprintf(stderr, "[NS-SS ERROR] Failed to create thread for SS #%d: %s\n",
-                    ss_id, strerror(result));
+            fprintf(stderr, "[NS-SS ERROR] Failed to create thread: %s\n", strerror(result));
             close_socket(ss_fd);
             free(thread_data);
             continue;
         }
 
-        printf("[NS-SS] Thread %lu created for Storage Server #%d\n",
-               (unsigned long)thread_id, ss_id);
+        printf("[NS-SS] Handler thread created for new connection\n");
         printf("[NS-SS] Waiting for next Storage Server...\n");
         printf("═══════════════════════════════════════════\n\n");
 
@@ -121,10 +116,9 @@ void* accept_storage_servers(void* arg) {
 }
 
 
-/*
+/** 
  * Thread function to handle communication with a Storage Server
  */
-
 
 void* handle_storage_server(void* arg) {
 
@@ -156,6 +150,9 @@ void* handle_storage_server(void* arg) {
         return NULL;
     }
     
+
+
+
     printf("\n┌─ SS Message #1 from Storage Server (temp %s:%d) ─────\n", 
            ss_conn.ip_address, ss_conn.port);
     printf("│ Length: %d bytes\n", bytes_received);
@@ -164,40 +161,60 @@ void* handle_storage_server(void* arg) {
     printf("└────────────────────────────────────────────────────\n");
     
 
-    // NOW register with the CORRECT port
-    StorageServerInfo ss_info = {
-        .ss_id = initial_ss_id,
-        .ss_fd = ss_fd,
-        .nm_port = nm_port,         
-        .client_port = client_port,
-        .is_active = true,
-        .accessible_paths = NULL,   
-        .num_paths = 0,
-        .thread_id = pthread_self(),
-        .first_connected = time(NULL),
-        .last_connected = time(NULL),
-        .reconnect_count = 0
-    };
+    printf("\n┌─ Registration from %s:%d ─────\n", ss_conn.ip_address, ss_conn.port);
+    printf("│ IP: %s, NM Port: %d, Client Port: %d\n", ss_ip, nm_port, client_port);
+    printf("└────────────────────────────────────────────────────\n");
 
-    strncpy(ss_info.ip_address, ss_ip, sizeof(ss_info.ip_address) - 1);
+    // Step 2: Check if this is a reconnection
+    StorageServerInfo* existing = find_storage_server_by_address(ss_ip, nm_port);
     
-
-    // Register in hash table
-    int ss_id = register_or_reconnect_storage_server(&ss_info);
+    int ss_id;
+    bool is_reconnection = (existing != NULL);
     
-    if (ss_id < 0) {
-        fprintf(stderr, "[NS-SS ERROR] Failed to register SS\n");
-        free(data);
-        close_socket(ss_fd);
-        return NULL;
+    if (is_reconnection) {
+        // REUSE old ID for reconnection
+        ss_id = existing->ss_id;
+        printf("[NS-SS] ⟳ RECONNECTION detected! Reusing ID #%d\n", ss_id);
+        
+        // Update existing entry
+        existing->ss_fd = ss_fd;
+        existing->client_port = client_port;
+        existing->is_active = true;
+        existing->last_connected = time(NULL);
+        existing->reconnect_count++;
+        existing->thread_id = pthread_self();
+        
+    } else {
+        // NEW server - assign fresh ID
+        ss_id = assign_new_ss_id();
+        printf("[NS-SS] NEW server! Assigned ID #%d\n", ss_id);
+        
+        // Create new entry
+        StorageServerInfo ss_info = {
+            .ss_id = ss_id,
+            .ss_fd = ss_fd,
+            .nm_port = nm_port,
+            .client_port = client_port,
+            .is_active = true,
+            .accessible_paths = NULL,
+            .num_paths = 0,
+            .thread_id = pthread_self(),
+            .first_connected = time(NULL),
+            .last_connected = time(NULL),
+            .reconnect_count = 0
+        };
+        strncpy(ss_info.ip_address, ss_ip, sizeof(ss_info.ip_address) - 1);
+        
+        int result = register_or_reconnect_storage_server(&ss_info);
+        if (result < 0) {
+            fprintf(stderr, "[NS-SS ERROR] Failed to register new SS\n");
+            close_socket(ss_fd);
+            return NULL;
+        }
     }
 
-    
-    printf("\n[NS-SS] Thread created for Storage Server #%d (%s:%d)\n", 
-           ss_id, ss_conn.ip_address, ss_conn.port);
-    
-     
-           
+    printf("[NS-SS] Storage Server #%d (%s:%d) ready\n", ss_id, ss_ip, nm_port);
+               
     // Send ACK
     const char* ack = "ACK";
     send_message(ss_fd, ack);
@@ -207,8 +224,6 @@ void* handle_storage_server(void* arg) {
     bool ss_connected = true;
     int message_count = 1;  // Already got first message
     
-
-
     while (ss_connected && running) {
         // Receive message from Storage Server
         int bytes_received = recv_message(ss_fd, buffer, NS_SS_BUFFER_SIZE);
@@ -267,4 +282,12 @@ void* handle_storage_server(void* arg) {
 }
 
 
-
+/**
+ * Helper function to assign new SS ID (only for truly new servers)
+ */
+int assign_new_ss_id() {
+    pthread_mutex_lock(&ss_id_mutex);
+    int new_id = ++ss_id_counter;
+    pthread_mutex_unlock(&ss_id_mutex);
+    return new_id;
+}

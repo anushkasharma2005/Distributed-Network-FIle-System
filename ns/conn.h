@@ -9,11 +9,11 @@
 #include <pthread.h>
 
 
-#include "handle_client.h"
-#include "handle_ss.h"
+#include "../include/constants.h"
 #include "ss_registry.h"
 #include "file_registry.h"
-#include "../include/constants.h"
+#include "handle_client.h"
+#include "handle_ss.h"
 
 
 typedef struct {

@@ -17,6 +17,7 @@ typedef struct {
     int ss_client_port;             // SS client port
     time_t created_at;              // When file was created
     time_t last_accessed;           // Last access time
+    char* owner;                    // Owner ID
     bool is_active;                 // Is file still available?
 } FileInfo;
 

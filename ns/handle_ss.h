@@ -43,4 +43,11 @@ int setup_ss_server();
  */
 void* accept_storage_servers(void* arg);
 
+/**
+ * Assign a new unique ID to a Storage Server
+ * @return New unique SS ID
+ */
+int assign_new_ss_id();
+
+
 #endif // HANDLE_SS_H

@@ -141,7 +141,7 @@ int register_or_reconnect_storage_server(StorageServerInfo* ss_info) {
     
     pthread_mutex_unlock(&ss_registry.mutex);
     
-    printf("[SS-Registry] ✓ NEW SS #%d registered (%s:%d) at bucket %u (Total: %d)\n", 
+    printf("[SS-Registry] > NEW SS #%d registered (%s:%d) at bucket %u (Total: %d)\n", 
            ss_info->ss_id, ss_info->ip_address, ss_info->nm_port, index, ss_registry.count);
     
     return ss_info->ss_id;
