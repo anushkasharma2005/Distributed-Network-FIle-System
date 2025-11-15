@@ -6,6 +6,9 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <signal.h>
+#include <errno.h>
+
+extern volatile sig_atomic_t ns_connection_lost;
 
 void signal_handler(int sig) {
     (void)sig;
@@ -125,8 +128,18 @@ int main(int argc, char *argv[]) {
     printf("==============================================\n\n");
 
     // Step 7: Accept and handle client connections
+    // Monitor for NS connection loss while accepting clients
     // This is the main loop
-    ss_accept_clients(client_listen_fd, &client_manager);
+    // ss_accept_clients(client_listen_fd, &client_manager);
+    while (keep_running && !ns_connection_lost) {
+        ss_accept_clients(client_listen_fd, &client_manager);
+        
+        // Check if NS connection was lost
+        if (ns_connection_lost) {
+            printf("\n[SS] Name Server connection lost, initiating graceful shutdown...\n");
+            break;
+        }
+    }
 
     // Cleanup (reached only on shutdown)
     printf("\n[SS] Cleaning up...\n");

@@ -9,8 +9,11 @@
 #include <dirent.h>
 #include <errno.h>
 #include <sys/stat.h>
+#include <signal.h>
 #include <arpa/inet.h>
 
+volatile sig_atomic_t ns_connection_lost = 0;
+extern volatile sig_atomic_t keep_running;
 
 int ss_connect_to_ns(const char *ns_ip, int ns_port)
 {
@@ -192,11 +195,13 @@ int ss_handle_ns_commands(int sock_fd, const char *base_path)
     ProtocolMessage msg, response;
     char file_path[MAX_PATH_LEN];
 
-    while (1)
+    while (keep_running)
     {
         if (ss_receive_message(sock_fd, &msg) < 0)
         {
             fprintf(stderr, "[SS] Connection to NS lost\n");
+            ns_connection_lost = 1;  // Set flag to signal shutdown
+            keep_running = 0;  // Stop the loop
             return -1;
         }
 
