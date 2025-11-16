@@ -8,7 +8,7 @@
 #include "../registry/file_registry.h"
 #include "../registry/ss_registry.h"
 #include "../../api_c_ns/networking.h"
-
+#include "./handle_client_server.h"
 
 /**
  * Handle CREATE command from client
@@ -103,6 +103,7 @@
     ProtocolMessage ss_response;
     ssize_t received = recv(ss->ss_fd, &ss_response, sizeof(ProtocolMessage), 0);
     
+
     if (received != sizeof(ProtocolMessage)) {
         printf("[NS-Client ERROR] Invalid response from SS #%d\n", ss->ss_id);
         snprintf(error_msg, error_msg_size, "ERROR: Storage server communication failed");

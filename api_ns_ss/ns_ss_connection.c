@@ -60,6 +60,19 @@ int ss_send_message(int sock_fd, ProtocolMessage *msg)
         return -1;
     }
 
+    printf("\n\n\n");
+
+    printf("==================DEBUG=============================\n");
+    printf("data: %s\n", msg->data);
+    printf("mess: %s\n", msg->message);
+    printf("data_len:%d\n", msg->data_len);
+    printf("status:%d\n", msg->status);
+    printf("type:%d\n", msg->type);
+    printf("=====================================================\n");
+    printf("\n\n\n");
+
+
+
     ssize_t sent = send(sock_fd, msg, sizeof(ProtocolMessage), 0);
     if (sent < 0)
     {

@@ -272,10 +272,33 @@ int cmd_write(Client *client, const char *filename, int sentence_num) {
             break;
         }
 
-        // Parse word_index and content
+        // Parse word_index and content - PRESERVE SPACES
+        // Format: <word_index><spaces><content>
+        // We need to manually parse to preserve the exact spacing
+        
         int word_idx;
-        char content[MAX_BUFFER_SIZE];
-        if (sscanf(line, "%d %[^\n]", &word_idx, content) != 2) {
+        char *ptr = line;
+        
+        // Skip leading whitespace before word_index (if any)
+        while (*ptr == ' ' || *ptr == '\t') {
+            ptr++;
+        }
+        
+        // Parse word_index
+        char *endptr;
+        word_idx = strtol(ptr, &endptr, 10);
+        
+        // Check if parsing was successful
+        if (endptr == ptr) {
+            fprintf(stderr, "Invalid format. Use: <word_index> <content>\n");
+            continue;
+        }
+        
+        // Everything after the word_index number is the content (including leading spaces)
+        const char *content = endptr;
+        
+        // Validate that we have content (even if it's just spaces)
+        if (*content == '\0') {
             fprintf(stderr, "Invalid format. Use: <word_index> <content>\n");
             continue;
         }
