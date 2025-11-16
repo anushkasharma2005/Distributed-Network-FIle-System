@@ -136,6 +136,7 @@ WordNode* word_create(const char *word) {
 
     strncpy(node->word, word, MAX_WORD_LENGTH - 1);
     node->word[MAX_WORD_LENGTH - 1] = '\0';
+    node->whitespace_after[0] = '\0';  // No whitespace by default
     node->next = NULL;
 
     return node;
@@ -158,7 +159,13 @@ SentenceNode* sentence_create(char delimiter) {
 
     sentence->words = NULL;
     sentence->word_count = 0;
-    sentence->delimiter = delimiter;
+    if (delimiter) {
+        sentence->delimiters[0] = delimiter;
+        sentence->delimiters[1] = '\0';
+    } else {
+        sentence->delimiters[0] = '\0';
+    }
+    sentence->whitespace_after_delimiters[0] = '\0';
     sentence->locked_for_write = 0;
     sentence->locked_by[0] = '\0';
     sentence->next = NULL;
@@ -247,19 +254,43 @@ char* sentence_to_string(SentenceNode *sentence, char *buffer, size_t buffer_siz
 
     WordNode *current = sentence->words;
     while (current && offset < buffer_size - 1) {
-        int written = snprintf(buffer + offset, buffer_size - offset, 
-                               "%s%s", current->word, current->next ? " " : "");
-        if (written < 0 || written >= (int)(buffer_size - offset)) {
+        // Add the word
+        int word_len = strlen(current->word);
+        if (offset + word_len < buffer_size) {
+            strcpy(buffer + offset, current->word);
+            offset += word_len;
+        } else {
             break;
         }
-        offset += written;
+        
+        // Add whitespace after the word
+        if (current->whitespace_after[0] != '\0') {
+            int ws_len = strlen(current->whitespace_after);
+            if (offset + ws_len < buffer_size) {
+                strcpy(buffer + offset, current->whitespace_after);
+                offset += ws_len;
+            }
+        }
+        
         current = current->next;
     }
 
-    // Add delimiter
-    if (offset < buffer_size - 1 && sentence->delimiter) {
-        buffer[offset++] = sentence->delimiter;
-        buffer[offset] = '\0';
+    // Add delimiters (can be multiple like "!.?")
+    if (sentence->delimiters[0] != '\0') {
+        int delim_len = strlen(sentence->delimiters);
+        if (offset + delim_len < buffer_size) {
+            strcpy(buffer + offset, sentence->delimiters);
+            offset += delim_len;
+        }
+    }
+    
+    // Add whitespace after delimiters
+    if (sentence->whitespace_after_delimiters[0] != '\0') {
+        int ws_len = strlen(sentence->whitespace_after_delimiters);
+        if (offset + ws_len < buffer_size) {
+            strcpy(buffer + offset, sentence->whitespace_after_delimiters);
+            offset += ws_len;
+        }
     }
 
     return buffer;
@@ -378,59 +409,149 @@ void fs_parse_content(FileStructure *fs, const char *content) {
     }
 
     SentenceNode *current_sentence = NULL;
+    SentenceNode *last_sentence_in_list = NULL;
     char word_buffer[MAX_WORD_LENGTH];
     int word_idx = 0;
+    char whitespace_buffer[MAX_WHITESPACE];
+    int ws_idx = 0;
+    char delimiter_buffer[MAX_WHITESPACE];
+    int delim_idx = 0;
+    WordNode *last_word = NULL;
+    int after_delimiter = 0;  // Flag to track if we're collecting whitespace after delimiter(s)
 
     for (int i = 0; content[i] != '\0'; i++) {
         char ch = content[i];
 
         // Check for sentence delimiter
         if (ch == '.' || ch == '!' || ch == '?') {
+            // If we have accumulated whitespace, it goes before the delimiter
+            if (ws_idx > 0 && last_word) {
+                whitespace_buffer[ws_idx] = '\0';
+                strncpy(last_word->whitespace_after, whitespace_buffer, MAX_WHITESPACE - 1);
+                last_word->whitespace_after[MAX_WHITESPACE - 1] = '\0';
+                ws_idx = 0;
+                last_word = NULL;
+            }
+            
             // Add current word if exists
             if (word_idx > 0) {
                 word_buffer[word_idx] = '\0';
+                
                 if (!current_sentence) {
-                    current_sentence = sentence_create(ch);
+                    current_sentence = sentence_create('\0');
                     if (!fs->sentences) {
                         fs->sentences = current_sentence;
+                        last_sentence_in_list = current_sentence;
                     } else {
-                        SentenceNode *last = fs->sentences;
-                        while (last->next) last = last->next;
-                        last->next = current_sentence;
+                        last_sentence_in_list->next = current_sentence;
+                        last_sentence_in_list = current_sentence;
                     }
                     fs->sentence_count++;
                 }
+                
                 sentence_add_word(current_sentence, word_buffer, current_sentence->word_count);
+                
+                // Get the last word (but don't set it for whitespace accumulation)
+                WordNode *w = current_sentence->words;
+                while (w && w->next) w = w->next;
+                if (w) {
+                    w->whitespace_after[0] = '\0';  // No whitespace before delimiter
+                }
+                
                 word_idx = 0;
             }
 
-            // Finalize sentence
-            if (current_sentence) {
-                current_sentence->delimiter = ch;
-                current_sentence = NULL;
+            // Start or continue accumulating delimiters
+            if (!current_sentence) {
+                // Create sentence if needed
+                current_sentence = sentence_create('\0');
+                if (!fs->sentences) {
+                    fs->sentences = current_sentence;
+                    last_sentence_in_list = current_sentence;
+                } else {
+                    last_sentence_in_list->next = current_sentence;
+                    last_sentence_in_list = current_sentence;
+                }
+                fs->sentence_count++;
             }
+            
+            // Add delimiter to buffer
+            if (delim_idx < MAX_WHITESPACE - 1) {
+                delimiter_buffer[delim_idx++] = ch;
+            }
+            
+            after_delimiter = 1;
         } else if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r') {
-            // Word separator
+            // Whitespace character
             if (word_idx > 0) {
+                // We just finished a word, save it
                 word_buffer[word_idx] = '\0';
                 
                 if (!current_sentence) {
-                    current_sentence = sentence_create('.');
+                    current_sentence = sentence_create('\0');
                     if (!fs->sentences) {
                         fs->sentences = current_sentence;
+                        last_sentence_in_list = current_sentence;
                     } else {
-                        SentenceNode *last = fs->sentences;
-                        while (last->next) last = last->next;
-                        last->next = current_sentence;
+                        last_sentence_in_list->next = current_sentence;
+                        last_sentence_in_list = current_sentence;
                     }
                     fs->sentence_count++;
                 }
                 
                 sentence_add_word(current_sentence, word_buffer, current_sentence->word_count);
+                
+                // Get the last word to accumulate whitespace
+                WordNode *w = current_sentence->words;
+                while (w && w->next) w = w->next;
+                last_word = w;
+                
                 word_idx = 0;
+                ws_idx = 0;
+                after_delimiter = 0;
+                delim_idx = 0;
+                // Start accumulating whitespace
+                if (ws_idx < MAX_WHITESPACE - 1) {
+                    whitespace_buffer[ws_idx++] = ch;
+                }
+            } else if (after_delimiter && ws_idx < MAX_WHITESPACE - 1) {
+                // Accumulate whitespace after delimiter(s)
+                whitespace_buffer[ws_idx++] = ch;
+            } else if (last_word && ws_idx < MAX_WHITESPACE - 1) {
+                // Continue accumulating whitespace after a word
+                whitespace_buffer[ws_idx++] = ch;
             }
         } else {
-            // Regular character
+            // Regular character - start of new word
+            
+            // If we have accumulated delimiters, finalize the sentence
+            if (delim_idx > 0 && current_sentence) {
+                delimiter_buffer[delim_idx] = '\0';
+                strncpy(current_sentence->delimiters, delimiter_buffer, MAX_WHITESPACE - 1);
+                current_sentence->delimiters[MAX_WHITESPACE - 1] = '\0';
+                delim_idx = 0;
+                
+                // Save accumulated whitespace after delimiters
+                if (ws_idx > 0) {
+                    whitespace_buffer[ws_idx] = '\0';
+                    strncpy(current_sentence->whitespace_after_delimiters, whitespace_buffer, MAX_WHITESPACE - 1);
+                    current_sentence->whitespace_after_delimiters[MAX_WHITESPACE - 1] = '\0';
+                    ws_idx = 0;
+                }
+                
+                // Start new sentence
+                current_sentence = NULL;
+                after_delimiter = 0;
+            } else if (ws_idx > 0 && last_word) {
+                // Save accumulated whitespace to previous word
+                whitespace_buffer[ws_idx] = '\0';
+                strncpy(last_word->whitespace_after, whitespace_buffer, MAX_WHITESPACE - 1);
+                last_word->whitespace_after[MAX_WHITESPACE - 1] = '\0';
+                ws_idx = 0;
+                last_word = NULL;
+            }
+            
+            // Start new word
             if (word_idx < MAX_WORD_LENGTH - 1) {
                 word_buffer[word_idx++] = ch;
             }
@@ -440,18 +561,40 @@ void fs_parse_content(FileStructure *fs, const char *content) {
     // Handle trailing word without delimiter
     if (word_idx > 0) {
         word_buffer[word_idx] = '\0';
+        
         if (!current_sentence) {
-            current_sentence = sentence_create('.');
+            current_sentence = sentence_create('\0');
             if (!fs->sentences) {
                 fs->sentences = current_sentence;
+                last_sentence_in_list = current_sentence;
             } else {
-                SentenceNode *last = fs->sentences;
-                while (last->next) last = last->next;
-                last->next = current_sentence;
+                last_sentence_in_list->next = current_sentence;
+                last_sentence_in_list = current_sentence;
             }
             fs->sentence_count++;
         }
+        
         sentence_add_word(current_sentence, word_buffer, current_sentence->word_count);
+        
+        // Last word in file has no whitespace after
+        WordNode *w = current_sentence->words;
+        while (w && w->next) w = w->next;
+        if (w) {
+            w->whitespace_after[0] = '\0';
+        }
+    }
+    
+    // Handle trailing delimiters and whitespace
+    if (delim_idx > 0 && current_sentence) {
+        delimiter_buffer[delim_idx] = '\0';
+        strncpy(current_sentence->delimiters, delimiter_buffer, MAX_WHITESPACE - 1);
+        current_sentence->delimiters[MAX_WHITESPACE - 1] = '\0';
+    }
+    
+    if (ws_idx > 0 && after_delimiter && current_sentence) {
+        whitespace_buffer[ws_idx] = '\0';
+        strncpy(current_sentence->whitespace_after_delimiters, whitespace_buffer, MAX_WHITESPACE - 1);
+        current_sentence->whitespace_after_delimiters[MAX_WHITESPACE - 1] = '\0';
     }
 }
 
@@ -477,10 +620,6 @@ int fs_write_to_disk(FileStructure *fs, const char *base_path) {
         sentence_to_string(current, sentence_buffer, sizeof(sentence_buffer));
         fprintf(fp, "%s", sentence_buffer);
         
-        if (current->next) {
-            fprintf(fp, " ");
-        }
-        
         current = current->next;
     }
 
@@ -504,8 +643,7 @@ char* fs_read_all(FileStructure *fs, char *buffer, size_t buffer_size) {
     while (current && offset < buffer_size - 1) {
         sentence_to_string(current, sentence_buffer, sizeof(sentence_buffer));
         
-        int written = snprintf(buffer + offset, buffer_size - offset, 
-                               "%s%s", sentence_buffer, current->next ? " " : "");
+        int written = snprintf(buffer + offset, buffer_size - offset, "%s", sentence_buffer);
         if (written < 0 || written >= (int)(buffer_size - offset)) {
             break;
         }

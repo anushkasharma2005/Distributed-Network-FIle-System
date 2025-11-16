@@ -12,7 +12,7 @@ static __thread char error_buffer[256] = {0};
 int init_client(const char *server_ip, int port) {
     int client_fd;
     struct sockaddr_in server_addr;
-    printf("cp1\n");
+    // printf("cp1\n");
     if (server_ip == NULL) {
         snprintf(error_buffer, sizeof(error_buffer), "NULL server IP address");
         return NET_ERROR;
@@ -20,7 +20,7 @@ int init_client(const char *server_ip, int port) {
     
 
     client_fd = create_tcp_socket();
-    printf("cp2\n");
+    // printf("cp2\n");
     if (client_fd < 0) {
         snprintf(error_buffer, sizeof(error_buffer), 
                 "Failed to create socket: %s", strerror(errno));
@@ -40,16 +40,16 @@ int init_client(const char *server_ip, int port) {
         close(client_fd);
         return NET_ERROR;
     }
-    printf("cp3\n");
+    // printf("cp3\n");
     // Connect to server
     if (connect(client_fd, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
-        printf("ccp1\n");
+        // printf("ccp1\n");
         snprintf(error_buffer, sizeof(error_buffer), 
                 "Failed to connect to %s:%d: %s", server_ip, port, strerror(errno));
         close(client_fd);
         return NET_ERROR;
     }
-    printf("cp4\n");
+    // printf("cp4\n");
     printf("[CLIENT] Connected to %s:%d (fd: %d)\n", server_ip, port, client_fd);
     return client_fd;
 }

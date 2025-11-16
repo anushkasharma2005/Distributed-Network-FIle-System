@@ -7,6 +7,8 @@
 #include <pthread.h>
 #include <signal.h>
 #include <errno.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 extern volatile sig_atomic_t ns_connection_lost;
 
@@ -16,20 +18,60 @@ void signal_handler(int sig) {
     keep_running = 0;
 }
 
+// Thread argument structure
+typedef struct {
+    int ns_sock;
+    char base_path[256];
+} NSThreadArgs;
+
 // Thread for handling NS communication
 void *ns_communication_thread(void *arg) {
-    int ns_sock = *((int *)arg);
+    NSThreadArgs *args = (NSThreadArgs *)arg;
+    int ns_sock = args->ns_sock;
     char base_path[256];
     
-    // Get base path from config or use default
-    strcpy(base_path, "./storage");
+    strncpy(base_path, args->base_path, sizeof(base_path) - 1);
+    base_path[sizeof(base_path) - 1] = '\0';
     
-    printf("[SS] Starting NS communication handler\n");
+    // Free the argument structure
+    free(args);
+    
+    printf("[SS] Starting NS communication handler with base path: %s\n", base_path);
     
     // Handle NS commands (this blocks)
     ss_handle_ns_commands(ns_sock, base_path);
     
     return NULL;
+}
+
+// Create directory recursively
+int create_directory(const char *path) {
+    char tmp[512];
+    char *p = NULL;
+    size_t len;
+
+    snprintf(tmp, sizeof(tmp), "%s", path);
+    len = strlen(tmp);
+    
+    if (tmp[len - 1] == '/') {
+        tmp[len - 1] = 0;
+    }
+    
+    for (p = tmp + 1; *p; p++) {
+        if (*p == '/') {
+            *p = 0;
+            if (mkdir(tmp, 0755) != 0 && errno != EEXIST) {
+                return -1;
+            }
+            *p = '/';
+        }
+    }
+    
+    if (mkdir(tmp, 0755) != 0 && errno != EEXIST) {
+        return -1;
+    }
+    
+    return 0;
 }
 
 int main(int argc, char *argv[]) {
@@ -48,6 +90,18 @@ int main(int argc, char *argv[]) {
         nm_port = atoi(argv[3]);
         client_port = atoi(argv[4]);
     }
+    
+    // Create unique storage directory based on IP and client port
+    // Format: storage/IP_CLIENTPORT (e.g., storage/127.0.0.1_9003)
+    char unique_storage_path[512];
+    snprintf(unique_storage_path, sizeof(unique_storage_path), 
+             "%s/%s_%d", base_path, ss_ip, client_port);
+    
+    // Override base_path with unique path
+    strncpy(base_path, unique_storage_path, sizeof(base_path) - 1);
+    base_path[sizeof(base_path) - 1] = '\0';
+    
+    // Allow custom base path override from command line (optional)
     if (argc >= 6) {
         strncpy(base_path, argv[5], 255);
     }
@@ -60,6 +114,15 @@ int main(int argc, char *argv[]) {
     printf("Client Port: %d\n", client_port);
     printf("Base Path: %s\n", base_path);
     printf("==============================================\n\n");
+
+    // Create the unique storage directory
+    printf("[SS] Creating storage directory: %s\n", base_path);
+    if (create_directory(base_path) != 0) {
+        fprintf(stderr, "[SS] Failed to create storage directory: %s (%s)\n", 
+                base_path, strerror(errno));
+        return EXIT_FAILURE;
+    }
+    printf("[SS] Storage directory created successfully\n\n");
 
     // Setup signal handlers
     signal(SIGINT, signal_handler);
@@ -97,8 +160,22 @@ int main(int argc, char *argv[]) {
     // Step 4: Start NS communication thread
     printf("\n[SS] Step 4: Starting NS communication thread...\n");
     pthread_t ns_thread;
-    if (pthread_create(&ns_thread, NULL, ns_communication_thread, &ns_sock) != 0) {
+    
+    // Allocate thread arguments
+    NSThreadArgs *ns_args = (NSThreadArgs *)malloc(sizeof(NSThreadArgs));
+    if (!ns_args) {
+        fprintf(stderr, "[SS] Failed to allocate memory for NS thread arguments\n");
+        close(ns_sock);
+        return EXIT_FAILURE;
+    }
+    
+    ns_args->ns_sock = ns_sock;
+    strncpy(ns_args->base_path, base_path, sizeof(ns_args->base_path) - 1);
+    ns_args->base_path[sizeof(ns_args->base_path) - 1] = '\0';
+    
+    if (pthread_create(&ns_thread, NULL, ns_communication_thread, ns_args) != 0) {
         fprintf(stderr, "[SS] Failed to create NS communication thread\n");
+        free(ns_args);
         close(ns_sock);
         return EXIT_FAILURE;
     }

@@ -202,8 +202,8 @@ int ss_handle_stream(int client_fd, ClientRequest *request, ClientManager *manag
         }
 
         // Send delimiter as a word if needed
-        if (current_sentence->delimiter && keep_running) {
-            char delim_str[2] = {current_sentence->delimiter, '\0'};
+        if (current_sentence->delimiters && keep_running) {
+            char delim_str[2] = {current_sentence->delimiters, '\0'};
             memset(&response, 0, sizeof(ClientRequest));
             response.op_type = OP_ACK;
             response.status = 0;
