@@ -1,6 +1,12 @@
+#include <stdlib.h>
+#include <string.h>
+#include <errno.h>
+#include <unistd.h>
+
 #include "handle_ss.h"
 #include "../include/constants.h"
 #include "ss_registry.h"
+#include "conn.h"
 
 
 // Counter for assigning unique IDs to storage servers

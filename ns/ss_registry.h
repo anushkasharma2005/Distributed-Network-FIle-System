@@ -11,7 +11,7 @@
 /**
  * Storage Server information stored by NS
  */
-typedef struct {
+typedef struct StorageServerInfo{
     int ss_id;                      // Unique ID
     int ss_fd;                      // Socket file descriptor
     char ip_address[16];            // IP address

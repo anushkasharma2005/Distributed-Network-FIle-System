@@ -2,12 +2,9 @@
 #define HANDLE_SS_H
 
 
-#include <stdlib.h>
-#include <string.h>
-#include <errno.h>
-#include <unistd.h>
 
-#include "conn.h"
+#include "types.h"
+#include <stdlib.h>
 
 /**
  * Structure to pass data to Storage Server handler threads

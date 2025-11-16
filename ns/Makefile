@@ -6,8 +6,12 @@ LDFLAGS = -pthread
 # API directory
 API_DIR = ../api_c_ns
 
+# Header dependencies
+HEADERS = types.h conn.h handle_client_server.h handle_ss.h client_commands.h ss_registry.h file_registry.h ss_selector.h
+
+
 # Source files
-NS_SRC = main.c conn.c handle_client.c handle_ss.c ss_registry.c file_registry.c ss_selector.c
+NS_SRC = main.c conn.c handle_client_server.c handle_ss.c ss_registry.c file_registry.c ss_selector.c client_commands.c
 API_SRC = $(API_DIR)/networking.c $(API_DIR)/naming_server.c
 
 # Object files
@@ -26,7 +30,7 @@ $(TARGET): $(NS_OBJ) $(API_OBJ)
 	@echo "✓ NS server built successfully!"
 
 # Compile object files
-%.o: %.c
+%.o: %.c $(HEADERS)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 # Build API object files if needed

@@ -10,7 +10,7 @@
 /**
  * File information stored by NS
  */
-typedef struct {
+typedef struct FileInfo {
     char file_path[256];            // Full path (unique key)
     int ss_id;                      // Which SS has this file
     char ss_ip[16];                 // SS IP address

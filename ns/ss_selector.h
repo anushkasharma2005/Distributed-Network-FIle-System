@@ -1,7 +1,7 @@
 #ifndef SS_SELECTOR_H
 #define SS_SELECTOR_H
 
-#include "ss_registry.h"
+#include "types.h"
 
 /**
  * Select best storage server for new file

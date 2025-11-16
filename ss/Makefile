@@ -199,7 +199,7 @@ cleanall: clean
 	@echo "✓ Clean all complete"
 
 # Run the storage server (default configuration)
-run: all
+run: $(TARGET)
 	@echo "Starting Storage Server..."
 	./$(TARGET)
 

@@ -1,25 +1,9 @@
 #ifndef CONN_H
 #define CONN_H
 
-#include "../api_c_ns/naming_server.h"
-#include "../include/constants.h"
+#include "types.h"
 #include <signal.h>
 #include <stdbool.h>
-#include <ctype.h>
-#include <pthread.h>
-
-
-#include "../include/constants.h"
-#include "ss_registry.h"
-#include "file_registry.h"
-#include "handle_client.h"
-#include "handle_ss.h"
-
-
-typedef struct {
-    int client_server_fd;
-    int ss_server_fd;
-} ServerFDs;
 
 
 // Global flag for graceful shutdown

@@ -1,4 +1,14 @@
 #include "conn.h"
+#include "handle_client_server.h"
+#include "handle_ss.h"
+#include "ss_registry.h"
+#include "file_registry.h"
+#include "../api_c_ns/naming_server.h"
+#include "../api_c_ns/networking.h"
+#include "../include/constants.h"
+#include <stdio.h>
+#include <pthread.h>
+#include <unistd.h>
 
 
 // Global flag for graceful shutdown
@@ -73,7 +83,6 @@ int create_acceptance_threads(ServerFDs *fds) {
         close_socket(fds->ss_server_fd);
         return EXIT_FAILURE;
     }
-
 
     printf("[NS] Storage Server acceptance thread created\n");
     printf("[NS] Now accepting client connections...\n");
