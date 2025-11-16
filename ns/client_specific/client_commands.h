@@ -3,7 +3,7 @@
 
 #include "types.h"
 #include <stdbool.h>
-#include "../api_ns_ss/ns_ss_connection.h"
+#include "../../api_ns_ss/ns_ss_connection.h"
 
 /**
  * Processes a command received from the client

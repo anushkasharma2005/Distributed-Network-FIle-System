@@ -4,8 +4,8 @@
 #include <unistd.h>
 
 #include "handle_ss.h"
-#include "../include/constants.h"
-#include "ss_registry.h"
+#include "../../include/constants.h"
+#include "../registry/ss_registry.h"
 #include "conn.h"
 
 

@@ -7,14 +7,14 @@
 
 #include "handle_client_server.h"
 #include "client_commands.h"
-#include "conn.h"
-#include "../include/constants.h"
-#include "../api_c_ns/naming_server.h"
-#include "../api_c_ns/networking.h"
-#include "ss_registry.h"
-#include "file_registry.h"
-#include "ss_selector.h"
-#include "../api_ns_ss/ns_ss_connection.h"
+#include "../conn.h"
+#include "../../include/constants.h"
+#include "../../api_c_ns/naming_server.h"
+#include "../../api_c_ns/networking.h"
+#include "../registry/ss_registry.h"
+#include "../registry/file_registry.h"
+#include "../registry/ss_selector.h"
+#include "../../api_ns_ss/ns_ss_connection.h"
 
 
 

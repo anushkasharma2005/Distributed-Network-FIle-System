@@ -7,8 +7,6 @@
 SSHashTable ss_registry;
 
 
-
-
 /**
  * Hash function - uses IP address and port combination
  */

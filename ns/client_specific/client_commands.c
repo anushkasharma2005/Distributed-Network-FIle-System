@@ -1,12 +1,14 @@
-#include "client_commands.h"
-#include "ss_selector.h"
-#include "file_registry.h"
-#include "ss_registry.h"
-#include "../api_c_ns/networking.h"
 #include <stdio.h>
 #include <string.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
+
+#include "client_commands.h"
+#include "../registry/ss_selector.h"
+#include "../registry/file_registry.h"
+#include "../registry/ss_registry.h"
+#include "../../api_c_ns/networking.h"
+
 
 /**
  * Handle CREATE command from client
