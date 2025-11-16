@@ -6,6 +6,7 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
@@ -13,6 +14,7 @@
 #include <arpa/inet.h>
 #include <sys/time.h>
 
+#include "../api_ns_ss/ns_ss_connection.h"
 
 
 // Connection structure to hold socket information of the peer requesting connection
@@ -106,5 +108,14 @@ const char* get_socket_error();
  * @return NET_SUCCESS on success, NET_ERROR on failure
  */
 int get_peer_info(int socket_fd, Connection *conn);
+
+
+/**
+ * Send binary protocol message
+ */
+bool send_protocol_message(int fd, const ProtocolMessage* msg);
+
+
+bool recv_protocol_message(int fd, ProtocolMessage* msg);
 
 #endif // NETWORKING_H

@@ -15,6 +15,7 @@ typedef struct FileInfo {
     int ss_id;                      // Which SS has this file
     char ss_ip[16];                 // SS IP address
     int ss_client_port;             // SS client port
+    int ss_nm_port;                 // SS NM port, to look up for the ss
     time_t created_at;              // When file was created
     time_t last_accessed;           // Last access time
     char* owner;                    // Owner ID
@@ -57,7 +58,7 @@ void init_file_registry();
  * @param ss_client_port Storage server client port
  * @return 0 on success, -1 on failure
  */
-int register_file(const char* file_path, int ss_id, const char* ss_ip, int ss_client_port);
+int register_file(const char* file_path, int ss_id, const char* ss_ip, int ss_client_port, int ss_nm_port);
 
 /**
  * Find file by path (O(1) average case)

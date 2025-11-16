@@ -8,6 +8,7 @@
 #include <arpa/inet.h>
 #include <sys/time.h>
 
+
 // Thread-local storage for error messages
 static __thread char error_buffer[256] = {0};
 
@@ -229,4 +230,31 @@ int get_peer_info(int socket_fd, Connection *conn) {
               conn->ip_address, INET_ADDRSTRLEN);
     
     return NET_SUCCESS;
+}
+
+
+/**
+ * Send binary protocol message
+ */
+bool send_protocol_message(int fd, const ProtocolMessage* msg) {
+    ssize_t sent = send(fd, msg, sizeof(ProtocolMessage), 0);
+    if (sent != sizeof(ProtocolMessage)) {
+        printf("[ERROR][Networking] Failed to send protocol message: sent %zd of %zu bytes\n", 
+               sent, sizeof(ProtocolMessage));
+        return false;
+    }
+    return true;
+}
+
+/**
+ * Receive binary protocol message
+ */
+bool recv_protocol_message(int fd, ProtocolMessage* msg) {
+    ssize_t received = recv(fd, msg, sizeof(ProtocolMessage), 0);
+    if (received != sizeof(ProtocolMessage)) {
+        printf("[ERROR][Networking] Failed to receive protocol message: got %zd of %zu bytes\n", 
+               received, sizeof(ProtocolMessage));
+        return false;
+    }
+    return true;
 }

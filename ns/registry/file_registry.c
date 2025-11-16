@@ -33,7 +33,7 @@ void init_file_registry() {
 /**
  * Register a new file
  */
-int register_file(const char* file_path, int ss_id, const char* ss_ip, int ss_client_port) {
+int register_file(const char* file_path, int ss_id, const char* ss_ip, int ss_client_port, int ss_nm_port) {
     if (!file_path || !ss_ip) return -1;
     
     pthread_mutex_lock(&file_registry.mutex);
@@ -76,7 +76,8 @@ int register_file(const char* file_path, int ss_id, const char* ss_ip, int ss_cl
     new_node->value->created_at = time(NULL);
     new_node->value->last_accessed = time(NULL);
     new_node->value->is_active = true;
-    
+    new_node->value->ss_nm_port = ss_nm_port;
+
     // Insert at head
     new_node->next = file_registry.buckets[index];
     file_registry.buckets[index] = new_node;

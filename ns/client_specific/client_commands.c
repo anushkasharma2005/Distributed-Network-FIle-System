@@ -57,8 +57,9 @@
     // Register file and send success response
     if (register_file(file_path, selected_ss->ss_id,
                     selected_ss->ip_address,
-                    selected_ss->client_port) == 0) {
-        
+                    selected_ss->client_port,
+                    selected_ss->nm_port) == 0) {
+
         char response[512];
         snprintf(response, sizeof(response),
                 "SS_INFO %s %d",
@@ -85,18 +86,14 @@
     ns_msg.status = 0;
     strncpy(ns_msg.data, file_path, sizeof(ns_msg.data) - 1);
     
-    printf("[DEBUG NS] About to send ProtocolMessage:\n");
-    printf("  - sizeof(ProtocolMessage) = %zu bytes\n", sizeof(ProtocolMessage));
-    printf("  - ns_msg.type (raw) = %d\n", ns_msg.type);
-    printf("  - ns_msg.data = '%s' (length: %zu)\n", ns_msg.data, strlen(ns_msg.data));
+    // printf("[DEBUG NS] About to send ProtocolMessage:\n");
+    // printf("  - sizeof(ProtocolMessage) = %zu bytes\n", sizeof(ProtocolMessage));
+    // printf("  - ns_msg.type (raw) = %d\n", ns_msg.type);
+    // printf("  - ns_msg.data = '%s' (length: %zu)\n", ns_msg.data, strlen(ns_msg.data));
     
     printf("[NS→SS #%d] Sending CREATE for '%s'\n", ss->ss_id, file_path);
-    
-    ssize_t sent = send(ss->ss_fd, &ns_msg, sizeof(ProtocolMessage), 0);
-    
-    printf("[DEBUG NS] send() returned: %zd bytes\n", sent);
-    
-    return (sent == sizeof(ProtocolMessage));
+    return send_protocol_message(ss->ss_fd, &ns_msg);
+
 }
 
 /**
@@ -171,14 +168,91 @@
         // If the request is CREATE then handle create command
         handle_create_command(client_fd, file_path);
 
-    } else if (strcmp(command, "READ") == 0 || 
-               strcmp(command, "WRITE") == 0 ||
+    }else if (strcmp(command, "WRITE_LOCK") == 0) {
+
+        handle_write_command(client_fd, file_path);
+
+    }else if (strcmp(command, "READ") == 0 || 
                strcmp(command, "DELETE") == 0 ||
                strcmp(command, "INFO") == 0) {
+
         // If the request is READ/WRITE/DELETE/INFO then handle file operation command. 
         handle_file_operation_command(client_fd, file_path, command);
     } else {
         const char* response = "ERROR: Unknown command";
         send_message(client_fd, response);
     }
+}
+
+
+/**
+ * Handle WRITE command from client
+ * NS returns SS info, client writes directly to SS
+ */
+void handle_write_command(int client_fd, const char* file_path) {
+    printf("[NS-Client][WRITE] Client requested write access to '%s'\n", file_path);
+    
+    // 1. Look up file in registry
+    FileInfo* file_info = find_file(file_path);
+    
+    if (file_info == NULL) {
+        const char* error = "ERROR: File not found";
+        send_message(client_fd, error);
+        printf("[NS-Client][WRITE] ✗ File '%s' not found\n", file_path);
+        return;
+    }
+    
+    // 🔍 DEBUG: Print file info
+    printf("[DEBUG][WRITE] File found:\n");
+    printf("  - file_path: %s\n", file_info->file_path);
+    printf("  - ss_id: %d\n", file_info->ss_id);
+    printf("  - ss_ip: %s\n", file_info->ss_ip);
+    printf("  - ss_client_port: %d\n", file_info->ss_client_port);
+    printf("  - is_active: %s\n", file_info->is_active ? "TRUE" : "FALSE");
+    
+
+
+
+    if (!file_info->is_active) {
+        const char* error = "ERROR: File has been deleted by the owner";
+        send_message(client_fd, error);
+        printf("[NS-Client][WRITE] ✗ File '%s' has been deleted by the owner\n", file_path);
+        return;
+    }
+    
+    // 2. Get SS information
+    StorageServerInfo* ss = find_storage_server_by_address(file_info->ss_ip, file_info->ss_nm_port);
+
+    // 🔍 DEBUG: Check if SS was found
+    if (ss == NULL) {
+        printf("[DEBUG][WRITE] ✗ find_storage_server(%d) returned NULL!\n", file_info->ss_id);
+        const char* error = "ERROR: Storage server not found";
+        send_message(client_fd, error);
+        return;
+    }
+
+
+
+
+    if (ss == NULL || !ss->is_active) {
+        const char* error = "ERROR: Storage server not available";
+        send_message(client_fd, error);
+        printf("[NS-Client][WRITE] ✗ SS #%d not available\n", file_info->ss_id);
+        return;
+    }
+    
+    // 3. Send SS details to client
+    char response[512];
+    snprintf(response, sizeof(response),
+             "SS_INFO %s %d",
+             ss->ip_address,
+             ss->client_port);
+    
+    send_message(client_fd, response);
+    
+    printf("[NS-Client][WRITE] ✓ Directed client to SS #%d (%s:%d) for '%s'\n",
+           ss->ss_id, ss->ip_address, ss->client_port, file_path);
+    
+    // 4. Update last accessed time
+    file_info->last_accessed = time(NULL);
 }
