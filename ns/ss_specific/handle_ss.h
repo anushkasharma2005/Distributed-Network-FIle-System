@@ -15,6 +15,17 @@ typedef struct {
     int ss_id;              // Unique ID for this storage server
 } SSThreadData;
 
+
+typedef struct {
+    int ss_id;
+    int ss_fd;
+    char ss_ip[16];
+    int nm_port;
+    volatile bool should_monitor;
+} HeartbeatMonitorArgs;
+
+
+
 /**
  * Storage Server handler function that runs in a separate thread
  * Handles registration and ongoing communication with a single SS
@@ -45,5 +56,12 @@ void* accept_storage_servers(void* arg);
  */
 int assign_new_ss_id();
 
+/**
+ * Monitor the heartbeat of a Storage Server
+ * Runs in a separate thread, periodically checks for heartbeats
+ * @param arg Pointer to HeartbeatMonitorArgs structure
+ * @return NULL on thread completion
+ */
+void* monitor_ss_connection(void* arg);
 
 #endif // HANDLE_SS_H

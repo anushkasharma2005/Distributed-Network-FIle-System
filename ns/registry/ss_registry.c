@@ -132,6 +132,14 @@ int register_or_reconnect_storage_server(StorageServerInfo* ss_info) {
     new_node->value->last_connected = time(NULL);
     new_node->value->reconnect_count = 0;
     
+    if (pthread_mutex_init(&new_node->value->socket_mutex, NULL) != 0) {
+        fprintf(stderr, "[SS-Registry ERROR] Failed to initialize socket mutex for SS #%d\n", ss_info->ss_id);
+        free(new_node->value);
+        free(new_node);
+        pthread_mutex_unlock(&ss_registry.mutex);
+        return -1;
+    }
+
     new_node->next = ss_registry.buckets[index];
     ss_registry.buckets[index] = new_node;
     
@@ -189,6 +197,9 @@ int unregister_storage_server(int ss_id) {
                 prev->next = current->next;
             }
             
+            pthread_mutex_destroy(&current->value->socket_mutex);
+            
+
             // Free memory
             if (current->value->accessible_paths) {
                 for (int i = 0; i < current->value->num_paths; i++) {
@@ -236,16 +247,29 @@ int get_all_storage_servers(StorageServerInfo** servers, int max_size) {
 }
 
 /**
- * Mark storage server as inactive
+ * Mark storage server as inactive - O(1) lookup by IP+port
  */
-void mark_ss_inactive(int ss_id) {
-    StorageServerInfo* ss = find_storage_server(ss_id);
-    if (ss) {
-        pthread_mutex_lock(&ss_registry.mutex);
-        ss->is_active = false;
-        pthread_mutex_unlock(&ss_registry.mutex);
-        printf("[SS-Registry] Marked SS #%d as inactive\n", ss_id);
+void mark_ss_inactive(const char* ip_address, int nm_port) {
+    pthread_mutex_lock(&ss_registry.mutex);
+    
+    unsigned int index = hash_ss_key(ip_address, nm_port);
+    SSHashNode* current = ss_registry.buckets[index];
+    
+    while (current != NULL) {
+        if (strcmp(current->value->ip_address, ip_address) == 0 && 
+            current->value->nm_port == nm_port) {
+            current->value->is_active = false;
+            pthread_mutex_unlock(&ss_registry.mutex);
+            printf("[SS-Registry] Marked SS #%d (%s:%d) as inactive\n", 
+                   current->value->ss_id, ip_address, nm_port);
+            return;
+        }
+        current = current->next;
     }
+    
+    pthread_mutex_unlock(&ss_registry.mutex);
+    fprintf(stderr, "[SS-Registry WARNING] Could not find SS (%s:%d) to mark inactive\n", 
+            ip_address, nm_port);
 }
 
 /**
@@ -259,6 +283,8 @@ void cleanup_ss_registry() {
         while (current != NULL) {
             SSHashNode* temp = current;
             current = current->next;
+            
+            pthread_mutex_destroy(&temp->value->socket_mutex);
             
             if (temp->value->accessible_paths) {
                 for (int j = 0; j < temp->value->num_paths; j++) {

@@ -24,6 +24,8 @@ typedef struct StorageServerInfo{
     time_t first_connected;         // Time when the server first connected
     time_t last_connected;          // Time when the server last connected
     int reconnect_count;            // Number of reconnections
+    pthread_mutex_t socket_mutex;   // Mutex for thread-safe socket operations
+    pthread_t heartbeat_thread_id;  // Thread ID for heartbeat monitoring
 } StorageServerInfo;
 
 /**
@@ -97,7 +99,7 @@ StorageServerInfo* find_storage_server(int ss_id);
  * Mark storage server as inactive
  * @param ss_id Storage server ID
  */
-void mark_ss_inactive(int ss_id);
+void mark_ss_inactive(const char* ip_address, int nm_port);
 
 /**
  * Cleanup registry and free all resources

@@ -8,12 +8,12 @@
 #include "../registry/file_registry.h"
 #include "../registry/ss_registry.h"
 #include "../../api_c_ns/networking.h"
-
+#include "./handle_client_server.h"
 
 /**
  * Handle CREATE command from client
  */
- void handle_create_command(int client_fd, const char* file_path) {
+void handle_create_command(int client_fd, const char* file_path) {
     FileInfo* existing = find_file(file_path);
     
     if (existing != NULL && existing->is_active) {
@@ -80,19 +80,26 @@
  * Send CREATE request to Storage Server
  */
  bool send_create_request_to_ss(StorageServerInfo* ss, const char* file_path) {
+    
+    pthread_mutex_lock(&ss->socket_mutex);
+    
     ProtocolMessage ns_msg;
     memset(&ns_msg, 0, sizeof(ProtocolMessage));
     ns_msg.type = htonl(MSG_CREATE_FILE);
     ns_msg.status = 0;
     strncpy(ns_msg.data, file_path, sizeof(ns_msg.data) - 1);
     
-    // printf("[DEBUG NS] About to send ProtocolMessage:\n");
-    // printf("  - sizeof(ProtocolMessage) = %zu bytes\n", sizeof(ProtocolMessage));
-    // printf("  - ns_msg.type (raw) = %d\n", ns_msg.type);
-    // printf("  - ns_msg.data = '%s' (length: %zu)\n", ns_msg.data, strlen(ns_msg.data));
+    bool result = send_protocol_message(ss->ss_fd, &ns_msg);
     
-    printf("[NS→SS #%d] Sending CREATE for '%s'\n", ss->ss_id, file_path);
-    return send_protocol_message(ss->ss_fd, &ns_msg);
+    if (!result) {
+        // Send failed - mark SS inactive
+        printf("[NS][Client_commands] Failed to send to SS #%d\n", ss->ss_id);
+        pthread_mutex_unlock(&ss->socket_mutex);
+        return false;
+    }
+    
+    // Keep mutex locked - wait_for_ss_response will unlock
+    return true;
 
 }
 
@@ -100,8 +107,24 @@
  * Wait for and process Storage Server response
  */
  bool wait_for_ss_response(StorageServerInfo* ss, char* error_msg, size_t error_msg_size) {
+    
+    // Mutex is already locked from send_create_request_to_ss
+    
     ProtocolMessage ss_response;
     ssize_t received = recv(ss->ss_fd, &ss_response, sizeof(ProtocolMessage), 0);
+    
+    // Unlock immediately after recv
+    pthread_mutex_unlock(&ss->socket_mutex);
+
+
+    if (received == 0) {
+        // Connection closed
+        printf("[NS-SS] SS #%d disconnected during recv\n", ss->ss_id);
+        mark_ss_inactive(ss->ip_address, ss->nm_port);
+        snprintf(error_msg, error_msg_size, "ERROR: Storage server disconnected");
+        return false;
+    }
+
     
     if (received != sizeof(ProtocolMessage)) {
         printf("[NS-Client ERROR] Invalid response from SS #%d\n", ss->ss_id);
