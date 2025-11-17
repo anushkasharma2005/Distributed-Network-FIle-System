@@ -90,4 +90,13 @@
 
 
 
+// Heartbeat monitoring configuration
+#define SS_HEARTBEAT_INTERVAL_SEC 5      // Check SS connection every 5 seconds
+#define SS_HEARTBEAT_TIMEOUT_SEC 15      // Mark SS inactive after 15 seconds of no response
+
+// TCP Keepalive configuration (if using OS-level keepalive)
+#define TCP_KEEPALIVE_TIME 10            // Start probes after 10s idle
+#define TCP_KEEPALIVE_INTERVAL 5         // Probe every 5s
+#define TCP_KEEPALIVE_PROBES 3           // 3 failed probes = dead
+
 #endif // PROJECT_CONSTANTS_H

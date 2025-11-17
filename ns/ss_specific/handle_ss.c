@@ -131,7 +131,7 @@ void* handle_storage_server(void* arg) {
     SSThreadData* data = (SSThreadData*)arg; 
     int ss_fd = data->ss_fd;
     Connection ss_conn = data->ss_conn;
-    int initial_ss_id = data->ss_id;  // CHANGE: may not be final ID
+    // int initial_ss_id = data->ss_id;  // CHANGE: may not be final ID
 
     // Free the allocated data structure
     free(data);
@@ -166,10 +166,6 @@ void* handle_storage_server(void* arg) {
     printf("│ Extracted NM Port: %d ← USING THIS FOR IDENTIFICATION\n", nm_port);
     printf("└────────────────────────────────────────────────────\n");
     
-
-    printf("\n┌─ Registration from %s:%d ─────\n", ss_conn.ip_address, ss_conn.port);
-    printf("│ IP: %s, NM Port: %d, Client Port: %d\n", ss_ip, nm_port, client_port);
-    printf("└────────────────────────────────────────────────────\n");
 
     // Step 2: Check if this is a reconnection
     StorageServerInfo* existing = find_storage_server_by_address(ss_ip, nm_port);
@@ -226,63 +222,39 @@ void* handle_storage_server(void* arg) {
     send_message(ss_fd, ack);
     printf("[NS-SS] ✓ Acknowledgment sent to Storage Server #%d\n", ss_id);
     
-    // Handle remaining messages
-    bool ss_connected = true;
-    int message_count = 1;  // Already got first message
-    
-    while (ss_connected && running) {
-        // Receive message from Storage Server
-        int bytes_received = recv_message(ss_fd, buffer, NS_SS_BUFFER_SIZE);
-        
-        if (bytes_received == NET_CLOSED) {
-            printf("\n[NS-SS] Storage Server #%d (%s:%d) disconnected gracefully.\n", 
-                   ss_id, ss_ip, nm_port);
-            ss_connected = false;
-            break;
-        }
-        
-        if (bytes_received < 0) {
-            fprintf(stderr, "[NS-SS ERROR] Failed to receive message from SS #%d (%s:%d): %s\n",
-                    ss_id, ss_ip, nm_port, get_socket_error());
-            ss_connected = false;
-            break;
-        }
-        
-        message_count++;
-        
-        // Print received message
-        printf("\n┌─ SS Message #%d from Storage Server #%d (%s:%d) ─────\n", 
-               message_count, ss_id, ss_ip, nm_port);
-        printf("│ Length: %d bytes\n", bytes_received);
-        printf("│ Content: %s\n", buffer);
-        printf("└────────────────────────────────────────────────────\n");
-        
-        // TODO: Parse and handle SS registration/commands here
-        // For now, just send acknowledgment
-        
-        // Send acknowledgment back to Storage Server
-        char ack[256];
-        snprintf(ack, sizeof(ack), "ACK: Message received by NS from SS #%d", ss_id);
-        int bytes_sent = send_message(ss_fd, ack);
-        
-        if (bytes_sent < 0) {
-            fprintf(stderr, "[NS-SS ERROR] Failed to send acknowledgment to SS #%d: %s\n",
-                    ss_id, get_socket_error());
-            ss_connected = false;
-            break;
-        }
-        
-        printf("[NS-SS] ✓ Acknowledgment sent to Storage Server #%d\n", ss_id);
+    HeartbeatMonitorArgs* hb_args = malloc(sizeof(HeartbeatMonitorArgs));
+    if (!hb_args) {
+        fprintf(stderr, "[NS-SS ERROR] Failed to allocate heartbeat monitor args\n");
+        mark_ss_inactive(ss_ip, nm_port);
+        close_socket(ss_fd);
+        return NULL;
     }
     
-    // Close SS connection    
-    // On disconnect, unregister
-    mark_ss_inactive(ss_id);
-
-    close_socket(ss_fd);
-    printf("[NS-SS] Connection with Storage Server #%d (%s:%d) closed.\n", 
-           ss_id, ss_ip, nm_port);
-    printf("═══════════════════════════════════════════\n");
+    hb_args->ss_id = ss_id;
+    hb_args->ss_fd = ss_fd;
+    strncpy(hb_args->ss_ip, ss_ip, sizeof(hb_args->ss_ip));
+    hb_args->nm_port = nm_port;
+    hb_args->should_monitor = true;
+    
+    pthread_t heartbeat_thread;
+    if (pthread_create(&heartbeat_thread, NULL, monitor_ss_connection, hb_args) != 0) {
+        fprintf(stderr, "[NS-SS ERROR] Failed to create heartbeat monitor thread\n");
+        free(hb_args);
+        mark_ss_inactive(ss_ip, nm_port);
+        close_socket(ss_fd);
+        return NULL;
+    }
+    
+    // Store heartbeat thread ID in registry
+    StorageServerInfo* ss_info = find_storage_server_by_address(ss_ip, nm_port);
+    if (ss_info) {
+        ss_info->heartbeat_thread_id = heartbeat_thread;
+    }
+    
+    printf("[NS-SS] Storage Server #%d registration complete. Handler exiting, heartbeat monitor active.\n", ss_id);
+    
+    // Do NOT close socket - used by client commands and heartbeat
+    // Do NOT mark inactive - heartbeat thread handles that
     
     return NULL;
 }
@@ -296,4 +268,40 @@ int assign_new_ss_id() {
     int new_id = ++ss_id_counter;
     pthread_mutex_unlock(&ss_id_mutex);
     return new_id;
+}
+
+/** 
+ * Thread function to monitor heartbeat of a Storage Server 
+ */
+void* monitor_ss_connection(void* arg) {
+    HeartbeatMonitorArgs* hb_args = (HeartbeatMonitorArgs*)arg;
+    pthread_detach(pthread_self());
+    
+    printf("[NS-SS] Heartbeat monitor started for SS #%d (interval: %ds)\n", 
+           hb_args->ss_id, SS_HEARTBEAT_INTERVAL_SEC);
+    
+    while (hb_args->should_monitor && running) {
+        sleep(SS_HEARTBEAT_INTERVAL_SEC);
+        
+        char peek_buffer[1];
+        int result = recv(hb_args->ss_fd, peek_buffer, 1, MSG_PEEK | MSG_DONTWAIT);
+        
+        if (result == 0) {
+            printf("[NS-SS] Heartbeat: SS #%d (%s:%d) connection closed\n",
+                   hb_args->ss_id, hb_args->ss_ip, hb_args->nm_port);
+            mark_ss_inactive(hb_args->ss_ip, hb_args->nm_port);  // CHANGED
+            break;
+        }
+        
+        if (result < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
+            fprintf(stderr, "[NS-SS] Heartbeat: SS #%d (%s:%d) connection error: %s\n",
+                    hb_args->ss_id, hb_args->ss_ip, hb_args->nm_port, strerror(errno));
+            mark_ss_inactive(hb_args->ss_ip, hb_args->nm_port);  // CHANGED
+            break;
+        }
+    }
+    
+    printf("[NS-SS] Heartbeat monitor stopped for SS #%d\n", hb_args->ss_id);
+    free(hb_args);
+    return NULL;
 }
