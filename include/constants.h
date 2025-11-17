@@ -99,4 +99,7 @@
 #define TCP_KEEPALIVE_INTERVAL 5         // Probe every 5s
 #define TCP_KEEPALIVE_PROBES 3           // 3 failed probes = dead
 
+
+
+#define MAX_USERNAME_LENGTH 32
 #endif // PROJECT_CONSTANTS_H

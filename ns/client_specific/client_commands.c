@@ -13,7 +13,7 @@
 /**
  * Handle CREATE command from client
  */
-void handle_create_command(int client_fd, const char* file_path) {
+void handle_create_command(int client_fd, const char* file_path, const char* owner) {
     FileInfo* existing = find_file(file_path);
     
     if (existing != NULL && existing->is_active) {
@@ -58,7 +58,8 @@ void handle_create_command(int client_fd, const char* file_path) {
     if (register_file(file_path, selected_ss->ss_id,
                     selected_ss->ip_address,
                     selected_ss->client_port,
-                    selected_ss->nm_port) == 0) {
+                    selected_ss->nm_port,
+                    owner) == 0) {
 
         char response[512];
         snprintf(response, sizeof(response),
@@ -171,7 +172,7 @@ void handle_create_command(int client_fd, const char* file_path) {
 /**
  * Parse and dispatch client command
  */
- void process_client_command(int client_fd, const char* buffer, Connection client_conn) {
+ void process_client_command(int client_fd, const char* buffer, Connection client_conn, const char* username) {
     char command[32], file_path[256];
     
     if (sscanf(buffer, "%s %s", command, file_path) < 2) {
@@ -181,15 +182,15 @@ void handle_create_command(int client_fd, const char* file_path) {
     }
     
     printf("[NS-Client][Client_commands]\n");
-    printf("\n┌─ Client Request (%s:%d) ─────\n", 
-           client_conn.ip_address, client_conn.port);
+    printf("\n┌─ Client Request from '%s' (%s:%d) ─────\n",
+           username, client_conn.ip_address, client_conn.port);
     printf("│ Content: %s\n", buffer);
     printf("└──────────────────────────────\n");
     
     if (strcmp(command, "CREATE") == 0) {
 
         // If the request is CREATE then handle create command
-        handle_create_command(client_fd, file_path);
+        handle_create_command(client_fd, file_path,username);
 
     }else if (strcmp(command, "WRITE_LOCK") == 0) {
 
