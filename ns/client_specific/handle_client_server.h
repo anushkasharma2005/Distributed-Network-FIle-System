@@ -13,6 +13,7 @@
 typedef struct {
     int client_fd;           // Client socket file descriptor
     Connection client_conn;  // Client connection details (IP, port)
+    char username[MAX_USERNAME_LENGTH]; // Client username
 } ClientThreadData;
 
 /**

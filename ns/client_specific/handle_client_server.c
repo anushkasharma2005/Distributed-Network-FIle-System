@@ -159,6 +159,23 @@ void* handle_client(void* arg) {
     char buffer[NS_CLIENT_BUFFER_SIZE];
     bool client_connected = true;
     
+
+    // handle client identification
+    char username[MAX_USERNAME_LENGTH] = {0};
+    int bytes_received = recv_message(client_fd, buffer, NS_CLIENT_BUFFER_SIZE);
+    
+    if (bytes_received <= 0) {
+        printf("[NS-Client][Handle_Client] Failed to receive username from client\n");
+        close_socket(client_fd);
+        return NULL;
+    }
+    // Store username (trim whitespace)
+    strncpy(username, buffer, MAX_USERNAME_LENGTH - 1);
+    username[strcspn(username, "\r\n")] = 0;  // Remove newlines
+    
+    printf("[NS-Client][Handle_Client] ✓ Client identified as '%s' (%s:%d)\n",
+           username, client_conn.ip_address, client_conn.port);
+
     while (client_connected && running) {
         int bytes_received = recv_message(client_fd, buffer, NS_CLIENT_BUFFER_SIZE);
         
@@ -170,7 +187,7 @@ void* handle_client(void* arg) {
             break;
         }
 
-        process_client_command(client_fd, buffer, client_conn);
+        process_client_command(client_fd, buffer, client_conn, username);
     }
     
     close_socket(client_fd);

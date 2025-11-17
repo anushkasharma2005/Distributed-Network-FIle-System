@@ -58,7 +58,7 @@ void init_file_registry();
  * @param ss_client_port Storage server client port
  * @return 0 on success, -1 on failure
  */
-int register_file(const char* file_path, int ss_id, const char* ss_ip, int ss_client_port, int ss_nm_port);
+int register_file(const char* file_path, int ss_id, const char* ss_ip, int ss_client_port, int ss_nm_port, const char* owner);
 
 /**
  * Find file by path (O(1) average case)

@@ -47,13 +47,24 @@ int client_connect_to_nm(Client *client)
         return ERR_INVALID_COMMAND;
     if (client->nm_socket >= 0)
         return SUCCESS; // already connected
-    printf("p1\n");
+
+
+    // printf("p1\n");
     int fd = init_client(client->nm_ip, client->nm_port);
     if (fd < 0)
     {
         return ERR_CONNECTION;
     }
     client->nm_socket = fd;
+
+    if (send_message(client->nm_socket, client->username) <= 0)
+    {
+        fprintf(stderr, "Failed to send username to Name Server\n");
+        close_client(client->nm_socket);
+        client->nm_socket = -1;
+        return ERR_CONNECTION;
+    }
+
     client->connected = true;
     return SUCCESS;
 }

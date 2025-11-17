@@ -10,8 +10,9 @@
  * @param client_fd Client socket file descriptor
  * @param buffer Buffer containing the received command
  * @param client_conn Connection structure with client details
+ * @param username Username of the connected client
  */
-void process_client_command(int client_fd, const char* buffer, Connection client_conn);
+void process_client_command(int client_fd, const char* buffer, Connection client_conn, const char* username);
 
 // =======================CREATE COMMAND============================
 /**
@@ -20,7 +21,7 @@ void process_client_command(int client_fd, const char* buffer, Connection client
  * @param client_fd Client socket file descriptor
  * @param file_path Path of the file to create
  */
-void handle_create_command(int client_fd, const char* file_path);
+void handle_create_command(int client_fd, const char* file_path, const char* owner);
 
 /**
  * Sends a CREATE request to the specified storage server for the given file path
