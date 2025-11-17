@@ -58,5 +58,18 @@ void handle_file_operation_command(int client_fd, const char* file_path, const c
  */
 void handle_write_command(int client_fd, const char* file_path);
 
+/**
+ * Handle INFO command - returns detailed file information
+ * @param client_fd Client socket file descriptor
+ * @param file_path Path of the file to get info about
+ */
+void handle_info_command(int client_fd, const char* file_path);
+
+/**
+ * Handle LIST command - returns list of all users/owners
+ * @param client_fd Client socket file descriptor
+ */
+void handle_list_command(int client_fd);
+
 
 #endif // CLIENT_COMMANDS_H

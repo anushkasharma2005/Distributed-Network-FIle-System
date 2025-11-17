@@ -1,8 +1,9 @@
 #include "conn.h"
-#include "handle_client_server.h"
-#include "handle_ss.h"
-#include "ss_registry.h"
-#include "file_registry.h"
+#include "client_specific/handle_client_server.h"
+#include "ss_specific/handle_ss.h"
+#include "registry/ss_registry.h"
+#include "registry/file_registry.h"
+#include "registry/user_registry.h"
 #include "../api_c_ns/naming_server.h"
 #include "../api_c_ns/networking.h"
 #include "../include/constants.h"
@@ -52,6 +53,8 @@ ServerFDs setup_server(){
     // Initialize SS registry
     init_ss_registry();
     init_file_registry();
+    init_user_registry();
+
 
     printf("[NS] Storage Server registry initialized\n");
     printf("[NS] File registry initialized\n\n");
