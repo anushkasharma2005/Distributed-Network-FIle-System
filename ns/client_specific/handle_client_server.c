@@ -15,7 +15,7 @@
 #include "../registry/file_registry.h"
 #include "../registry/ss_selector.h"
 #include "../../api_ns_ss/ns_ss_connection.h"
-
+#include "../registry/user_registry.h"
 
 
 
@@ -173,6 +173,8 @@ void* handle_client(void* arg) {
     strncpy(username, buffer, MAX_USERNAME_LENGTH - 1);
     username[strcspn(username, "\r\n")] = 0;  // Remove newlines
     
+    register_user(username); // Register user in the user registry
+
     printf("[NS-Client][Handle_Client] ✓ Client identified as '%s' (%s:%d)\n",
            username, client_conn.ip_address, client_conn.port);
 

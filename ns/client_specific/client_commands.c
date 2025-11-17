@@ -2,11 +2,13 @@
 #include <string.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
+#include <time.h>
 
 #include "client_commands.h"
 #include "../registry/ss_selector.h"
 #include "../registry/file_registry.h"
 #include "../registry/ss_registry.h"
+#include "../registry/user_registry.h"
 #include "../../api_c_ns/networking.h"
 #include "./handle_client_server.h"
 
@@ -175,18 +177,29 @@ void handle_create_command(int client_fd, const char* file_path, const char* own
  void process_client_command(int client_fd, const char* buffer, Connection client_conn, const char* username) {
     char command[32], file_path[256];
     
-    if (sscanf(buffer, "%s %s", command, file_path) < 2) {
-        const char* error = "ERROR: Invalid command format";
-        send_message(client_fd, error);
-        return;
-    }
-    
+
+    int parsed = sscanf(buffer, "%s %s", command, file_path);
+
     printf("[NS-Client][Client_commands]\n");
     printf("\n┌─ Client Request from '%s' (%s:%d) ─────\n",
            username, client_conn.ip_address, client_conn.port);
     printf("│ Content: %s\n", buffer);
     printf("└──────────────────────────────\n");
     
+
+    if (strcmp(command, "LIST") == 0 || strcmp(command, "LIST_USERS") == 0) {
+        handle_list_command(client_fd);
+        return;
+    }
+    
+
+    if (parsed < 2) {
+        const char* error = "ERROR: Invalid command format";
+        send_message(client_fd, error);
+        return;
+    }
+    
+  
     if (strcmp(command, "CREATE") == 0) {
 
         // If the request is CREATE then handle create command
@@ -196,9 +209,13 @@ void handle_create_command(int client_fd, const char* file_path, const char* own
 
         handle_write_command(client_fd, file_path);
 
+    }else if(strcmp(command, "INFO") == 0){
+
+        // If the request is INFO then handle file operation command. 
+        handle_info_command(client_fd, file_path);
+
     }else if (strcmp(command, "READ") == 0 || 
-               strcmp(command, "DELETE") == 0 ||
-               strcmp(command, "INFO") == 0) {
+               strcmp(command, "DELETE") == 0) {
 
         // If the request is READ/WRITE/DELETE/INFO then handle file operation command. 
         handle_file_operation_command(client_fd, file_path, command);
@@ -279,4 +296,105 @@ void handle_write_command(int client_fd, const char* file_path) {
     
     // 4. Update last accessed time
     file_info->last_accessed = time(NULL);
+}
+
+
+void handle_info_command(int client_fd, const char* file_path) {
+    printf("[NS-Client][INFO] Client requested info for '%s'\n", file_path);
+    
+    // 1. Look up file in registry
+    FileInfo* file_info = find_file(file_path);
+    
+    if (file_info == NULL) {
+        const char* error = "ERROR: File not found";
+        send_message(client_fd, error);
+        printf("[NS-Client][INFO] ✗ File '%s' not found\n", file_path);
+        return;
+    }
+    
+    if (!file_info->is_active) {
+        const char* error = "ERROR: File is not currently available";
+        send_message(client_fd, error);
+        printf("[NS-Client][INFO] ✗ File '%s' is inactive\n", file_path);
+        return;
+    }
+    
+    // 2. Format timestamps
+    char created_str[64], accessed_str[64];
+    struct tm* created_tm = localtime(&file_info->created_at);
+    struct tm* accessed_tm = localtime(&file_info->last_accessed);
+    
+    strftime(created_str, sizeof(created_str), "%Y-%m-%d %H:%M", created_tm);
+    strftime(accessed_str, sizeof(accessed_str), "%Y-%m-%d %H:%M", accessed_tm);
+    
+    // 3. Build response in the format client expects
+    char response[MAX_BUFFER_SIZE];
+    snprintf(response, MAX_BUFFER_SIZE,
+             "--> File: %s\n"
+             "--> Owner: %s\n"
+             "--> Created: %s\n"
+             "--> Last Modified: %s\n"
+             "--> Size: N/A\n"
+             "--> Access: %s (RW)\n"
+             "--> Last Accessed: %s by %s",
+             file_path,
+             file_info->owner ? file_info->owner : "unknown",
+             created_str,
+             created_str,  // Using created time as modified time (no separate field yet)
+             file_info->owner ? file_info->owner : "unknown",
+             accessed_str,
+             file_info->owner ? file_info->owner : "unknown");
+    
+    // 4. Send response to client
+    send_message(client_fd, response);
+    
+    printf("[NS-Client][INFO] ✓ Sent file info to client\n");
+    printf("  - File: %s\n", file_path);
+    printf("  - Owner: %s\n", file_info->owner);
+    printf("  - Created: %s\n", created_str);
+    printf("  - Last Accessed: %s\n", accessed_str);
+}
+
+/**
+ * Handle LIST command - returns list of all users/owners
+ */
+void handle_list_command(int client_fd) {
+    printf("[NS-Client][LIST] Client requested user list\n");
+    
+    int user_count = get_user_count();
+    
+    if (user_count == 0) {
+        const char* msg = "No users registered";
+        send_message(client_fd, msg);
+        printf("[NS-Client][LIST] ✗ No users found\n");
+        return;
+    }
+    
+    // Get user pointers (don't free these - they point to registry's internal data)
+    char* users[MAX_USERS];
+    int count = get_all_users(users, MAX_USERS);
+    
+    // Build response string
+    char response[MAX_BUFFER_SIZE];
+    int offset = 0;
+    
+    for (int i = 0; i < count; i++) {
+        offset += snprintf(response + offset, MAX_BUFFER_SIZE - offset, 
+                          "--> %s\n", users[i]);
+        
+        if (offset >= MAX_BUFFER_SIZE - 100) {
+            fprintf(stderr, "[NS-Client][LIST] Warning: Response truncated\n");
+            break;
+        }
+    }
+    
+    // Remove trailing newline
+    if (offset > 0 && response[offset - 1] == '\n') {
+        response[offset - 1] = '\0';
+    }
+    
+    // Send response
+    send_message(client_fd, response);
+    
+    printf("[NS-Client][LIST] ✓ Sent %d users to client\n", count);
 }
