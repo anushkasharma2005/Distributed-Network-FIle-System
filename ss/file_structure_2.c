@@ -14,7 +14,7 @@
  * Returns pointer to the sentence at sentence_num, or NULL on error.
  * NOTE: Caller must hold fs->file_lock (at least read lock, write lock if creating)
  */
-static SentenceNode* ensure_sentence_exists(FileStructure *fs, int sentence_num) {
+SentenceNode* ensure_sentence_exists(FileStructure *fs, int sentence_num) {
     if (!fs || sentence_num < 0) {
         return NULL;
     }
@@ -648,7 +648,7 @@ int fs_write_word(FileStructure *fs, int sentence_num, int word_index,
     SentenceNode *current_sentence = start_sentence;
     int current_sentence_num = sentence_num;
     int insert_pos = word_index;
-    int first_sentence = 1;
+    // int first_sentence = 1;
 
     while (parsed_sentence) {
         // Handle leading whitespace for first word
@@ -743,7 +743,7 @@ int fs_write_word(FileStructure *fs, int sentence_num, int word_index,
             
             // For subsequent sentences, always insert at position 0
             insert_pos = 0;
-            first_sentence = 0;
+            // first_sentence = 0;
         }
     }
 

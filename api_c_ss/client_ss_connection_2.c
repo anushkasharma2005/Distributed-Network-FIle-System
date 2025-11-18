@@ -63,46 +63,6 @@ WriteSession* ss_find_write_session(ClientManager *manager, int client_fd) {
     return NULL;
 }
 
-// void ss_destroy_write_session(ClientManager *manager, int client_fd) {
-//     if (!manager) {
-//         return;
-//     }
-
-//     pthread_mutex_lock(&manager->session_lock);
-
-//     WriteSession *current = manager->active_sessions;
-//     WriteSession *prev = NULL;
-
-//     while (current) {
-//         if (current->client_fd == client_fd) {
-
-//             // Before destroying the session, unlock the sentence
-//             FileStructure *fs = fm_get_file(manager->file_manager, current->filename);
-//             if (fs) {
-//                 fs_unlock_sentence(fs, current->sentence_num);
-//                 printf("[SS] Sentence %d unlocked during session cleanup for %s\n", 
-//                        current->sentence_num, current->filename);
-//             }
-
-//             if (prev) {
-//                 prev->next = current->next;
-//             } else {
-//                 manager->active_sessions = current->next;
-//             }
-            
-//             printf("[SS] Write session destroyed for %s by %s\n", 
-//                    current->filename, current->username);
-//             free(current);
-//             pthread_mutex_unlock(&manager->session_lock);
-//             return;
-//         }
-//         prev = current;
-//         current = current->next;
-//     }
-
-//     pthread_mutex_unlock(&manager->session_lock);
-// }
-
 void ss_destroy_write_session(ClientManager *manager, int client_fd) {
     if (!manager) {
         return;
@@ -159,79 +119,6 @@ void ss_destroy_write_session(ClientManager *manager, int client_fd) {
 }
 
 // ==================== Write Operation Handlers ====================
-// int ss_handle_write_begin(int client_fd, ClientRequest *request, ClientManager *manager) {
-//     ClientRequest response;
-    
-//     memset(&response, 0, sizeof(ClientRequest));
-//     response.op_type = OP_ACK;
-//     strncpy(response.filename, request->filename, MAX_FILENAME - 1);
-
-//     // Get or create file structure
-//     FileStructure *fs = fm_get_or_create_file(manager->file_manager, 
-//                                                request->filename, 
-//                                                request->username);
-//     if (!fs) {
-//         response.status = -1;
-//         snprintf(response.error_msg, 512, "Failed to load file");
-//         ss_send_to_client(client_fd, &response);
-//         return -1;
-//     }
-
-//     // Create snapshot before writing
-//     if (fs_create_snapshot(fs, request->username) != 0) {
-//         fprintf(stderr, "[SS] Warning: Failed to create snapshot for %s\n", 
-//                 request->filename);
-//     }
-
-    
-//     // Lock the sentence
-//     int lock_result = fs_lock_sentence(fs, request->sentence_num, request->username);
-//     if (lock_result == -5) {
-//         // Sentence index out of range
-//         // ClientRequest resp;
-//         // memset(&resp, 0, sizeof(ClientRequest));
-//         response.op_type = OP_ERROR;
-//         response.status = -5;
-//         snprintf(response.error_msg, sizeof(response.error_msg), 
-//                 "ERROR: Sentence index %d out of range (file has %d sentences, valid range is 0-%d)",
-//                 request->sentence_num, fs->sentence_count, fs->sentence_count);
-        
-//         ss_send_to_client(client_fd, &response);
-//         return -1;
-//     } else if (lock_result != 0) {
-//         // Other locking errors (already locked, etc.)
-//         // ClientRequest resp;
-//         // memset(&resp, 0, sizeof(ClientRequest));
-//         response.op_type = OP_ERROR;
-//         response.status = lock_result;
-//         snprintf(response.error_msg, sizeof(response.error_msg), 
-//                 "ERROR: Failed to lock sentence %d", request->sentence_num);
-        
-//         ss_send_to_client(client_fd, &response);
-//         return -1;
-//     }
-
-//     // Create write session
-//     WriteSession *session = ss_create_write_session(manager, client_fd, 
-//                                                      request->filename, 
-//                                                      request->username, 
-//                                                      request->sentence_num);
-//     if (!session) {
-//         fs_unlock_sentence(fs, request->sentence_num);
-//         response.status = -1;
-//         snprintf(response.error_msg, 512, "Failed to create write session");
-//         ss_send_to_client(client_fd, &response);
-//         return -1;
-//     }
-
-//     response.status = 0;
-//     snprintf(response.error_msg, 512, "Write session started");
-//     ss_send_to_client(client_fd, &response);
-
-//     printf("[SS] WRITE_BEGIN: Sentence %d locked for %s in file %s\n", 
-//            request->sentence_num, request->username, request->filename);
-//     return 0;
-// }
 
 int ss_handle_write_begin(int client_fd, ClientRequest *request, ClientManager *manager) {
     ClientRequest response;
@@ -259,7 +146,44 @@ int ss_handle_write_begin(int client_fd, ClientRequest *request, ClientManager *
 
     pthread_rwlock_wrlock(&fs->file_lock);
 
-    // Check if sentence_num is valid
+    // **NEW: Validate sentence boundaries based on delimiters**
+    if (request->sentence_num > 0) {
+        // For sentence N (N > 0), check if sentence N-1 exists AND has a delimiter
+        SentenceNode *prev_sentence = find_sentence(fs, request->sentence_num - 1);
+        
+        if (!prev_sentence) {
+            // Previous sentence doesn't exist - definitely out of range
+            pthread_rwlock_unlock(&fs->file_lock);
+            response.status = -5;
+            snprintf(response.error_msg, sizeof(response.error_msg), 
+                    "ERROR: Cannot write to sentence %d. Sentence %d does not exist. "
+                    "File has %d sentence(s), valid range is 0-%d",
+                    request->sentence_num, request->sentence_num - 1,
+                    fs->sentence_count, fs->sentence_count);
+            ss_send_to_client(client_fd, &response);
+            return -1;
+        }
+        
+        // Check if previous sentence has a delimiter
+        pthread_rwlock_rdlock(&prev_sentence->lock);
+        int has_delimiter = (prev_sentence->delimiters[0] != '\0');
+        pthread_rwlock_unlock(&prev_sentence->lock);
+        
+        if (!has_delimiter) {
+            // Previous sentence has no delimiter - cannot start new sentence
+            pthread_rwlock_unlock(&fs->file_lock);
+            response.status = -5;
+            snprintf(response.error_msg, sizeof(response.error_msg), 
+                    "ERROR: Cannot write to sentence %d. Sentence %d has no delimiter (., !, or ?). "
+                    "A sentence must end with a delimiter before starting a new sentence. "
+                    "Use WRITE %d to continue the current sentence.",
+                    request->sentence_num, request->sentence_num - 1, request->sentence_num - 1);
+            ss_send_to_client(client_fd, &response);
+            return -1;
+        }
+    }
+
+    // **Valid range check after delimiter validation**
     if (request->sentence_num > fs->sentence_count) {
         pthread_rwlock_unlock(&fs->file_lock);
         response.status = -5;
@@ -366,7 +290,7 @@ int ss_handle_write_begin(int client_fd, ClientRequest *request, ClientManager *
         return -1;
     }
 
-    // Store temp_fs pointer in session (you'll need to add this field)
+    // Store temp_fs pointer in session
     session->temp_fs = temp_fs;
 
     response.status = 0;
@@ -377,167 +301,6 @@ int ss_handle_write_begin(int client_fd, ClientRequest *request, ClientManager *
            request->sentence_num, request->username, request->filename);
     return 0;
 }
-
-// int ss_handle_write_update(int client_fd, ClientRequest *request, ClientManager *manager) {
-//     ClientRequest response;
-    
-//     memset(&response, 0, sizeof(ClientRequest));
-//     response.op_type = OP_ACK;
-//     strncpy(response.filename, request->filename, MAX_FILENAME - 1);
-
-//     // Find active write session
-//     WriteSession *session = ss_find_write_session(manager, client_fd);
-//     if (!session) {
-//         response.status = -1;
-//         snprintf(response.error_msg, 512, "No active write session");
-//         ss_send_to_client(client_fd, &response);
-//         return -1;
-//     }
-
-//     // Get file structure
-//     FileStructure *fs = fm_get_file(manager->file_manager, session->filename);
-//     if (!fs) {
-//         response.status = -1;
-//         snprintf(response.error_msg, 512, "File not found");
-//         ss_send_to_client(client_fd, &response);
-//         return -1;
-//     }
-
-//     // Perform write operation
-//     int result = fs_write_word(fs, session->sentence_num, request->word_index, 
-//                                request->content, session->username);
-    
-//     if (result == -4) {
-//         // Word index out of range
-//         response.status = -4;
-        
-//         // Get current word count for better error message
-//         pthread_rwlock_rdlock(&fs->file_lock);
-//         SentenceNode *sentence = fs->sentences;
-//         int count = 0;
-//         while (sentence && count < session->sentence_num) {
-//             sentence = sentence->next;
-//             count++;
-//         }
-//         int word_count = sentence ? sentence->word_count : 0;
-//         pthread_rwlock_unlock(&fs->file_lock);
-        
-//         snprintf(response.error_msg, sizeof(response.error_msg), 
-//                 "ERROR: Word index %d out of range (sentence %d has %d words, valid range is 0-%d)",
-//                 request->word_index, session->sentence_num, word_count, word_count);
-//     } else if (result == -5) {
-//         // Sentence index out of range (shouldn't happen in UPDATE, but handle it)
-//         response.status = -5;
-//         snprintf(response.error_msg, sizeof(response.error_msg), 
-//                 "ERROR: Sentence index out of range");
-//     } else if (result != 0) {
-//         // Other errors
-//         response.status = -1;
-//         snprintf(response.error_msg, 512, "Write operation failed (error code: %d)", result);
-//     } else {
-//         response.status = 0;
-//         snprintf(response.error_msg, 512, "Write successful");
-//     }
-
-//     ss_send_to_client(client_fd, &response);
-    
-//     if (result == 0) {
-//         printf("[SS] WRITE_UPDATE: Updated sentence %d in file %s\n", 
-//                session->sentence_num, session->filename);
-//     }
-    
-//     return result;
-// }
-
-// int ss_handle_write_update(int client_fd, ClientRequest *request, ClientManager *manager) {
-//     ClientRequest response;
-    
-//     memset(&response, 0, sizeof(ClientRequest));
-//     response.op_type = OP_ACK;
-//     strncpy(response.filename, request->filename, MAX_FILENAME - 1);
-
-//     // Find active write session
-//     WriteSession *session = ss_find_write_session(manager, client_fd);
-//     if (!session) {
-//         response.status = -1;
-//         snprintf(response.error_msg, 512, "No active write session");
-//         ss_send_to_client(client_fd, &response);
-//         return -1;
-//     }
-
-//     // Get file structure
-//     FileStructure *fs = fm_get_file(manager->file_manager, session->filename);
-//     if (!fs) {
-//         response.status = -1;
-//         snprintf(response.error_msg, 512, "File not found");
-//         ss_send_to_client(client_fd, &response);
-//         ss_destroy_write_session(manager, client_fd);  // Clean up on error
-//         return -1;
-//     }
-
-//     // Perform write operation
-//     int result = fs_write_word(fs, session->sentence_num, request->word_index, 
-//                                request->content, session->username);
-    
-//     if (result == -4) {
-//         // Word index out of range
-//         response.status = -4;
-        
-//         // Get current word count for better error message
-//         pthread_rwlock_rdlock(&fs->file_lock);
-//         SentenceNode *sentence = fs->sentences;
-//         int count = 0;
-//         while (sentence && count < session->sentence_num) {
-//             sentence = sentence->next;
-//             count++;
-//         }
-//         int word_count = sentence ? sentence->word_count : 0;
-//         pthread_rwlock_unlock(&fs->file_lock);
-        
-//         snprintf(response.error_msg, sizeof(response.error_msg), 
-//                 "ERROR: Word index %d out of range (sentence %d has %d words, valid range is 0-%d)",
-//                 request->word_index, session->sentence_num, word_count, word_count);
-        
-//         ss_send_to_client(client_fd, &response);
-        
-//         // Clean up the session and unlock sentence on error
-//         ss_destroy_write_session(manager, client_fd);
-//         return -1;
-        
-//     } else if (result == -5) {
-//         // Sentence index out of range (shouldn't happen in UPDATE, but handle it)
-//         response.status = -5;
-//         snprintf(response.error_msg, sizeof(response.error_msg), 
-//                 "ERROR: Sentence index out of range");
-        
-//         ss_send_to_client(client_fd, &response);
-        
-//         // Clean up the session and unlock sentence on error
-//         ss_destroy_write_session(manager, client_fd);
-//         return -1;
-        
-//     } else if (result != 0) {
-//         // Other errors
-//         response.status = -1;
-//         snprintf(response.error_msg, 512, "Write operation failed (error code: %d)", result);
-        
-//         ss_send_to_client(client_fd, &response);
-        
-//         // Clean up the session and unlock sentence on error
-//         ss_destroy_write_session(manager, client_fd);
-//         return -1;
-//     }
-
-//     // Success case
-//     response.status = 0;
-//     snprintf(response.error_msg, 512, "Write successful");
-//     ss_send_to_client(client_fd, &response);
-    
-//     printf("[SS] WRITE_UPDATE: Updated sentence %d in file %s\n", 
-//            session->sentence_num, session->filename);
-    
-//     return 0;
-// }
 
 int ss_handle_write_update(int client_fd, ClientRequest *request, ClientManager *manager) {
     ClientRequest response;
@@ -593,53 +356,6 @@ int ss_handle_write_update(int client_fd, ClientRequest *request, ClientManager 
     return 0;
 }
 
-// int ss_handle_write_end(int client_fd, ClientRequest *request, ClientManager *manager) {
-//     ClientRequest response;
-    
-//     memset(&response, 0, sizeof(ClientRequest));
-//     response.op_type = OP_ACK;
-//     strncpy(response.filename, request->filename, MAX_FILENAME - 1);
-
-//     // Find active write session
-//     WriteSession *session = ss_find_write_session(manager, client_fd);
-//     if (!session) {
-//         response.status = -1;
-//         snprintf(response.error_msg, 512, "No active write session");
-//         ss_send_to_client(client_fd, &response);
-//         return -1;
-//     }
-
-//     // Get file structure
-//     FileStructure *fs = fm_get_file(manager->file_manager, session->filename);
-//     if (!fs) {
-//         response.status = -1;
-//         snprintf(response.error_msg, 512, "File not found");
-//         ss_send_to_client(client_fd, &response);
-//         ss_destroy_write_session(manager, client_fd);
-//         return -1;
-//     }
-
-//     // Unlock sentence
-//     fs_unlock_sentence(fs, session->sentence_num);
-
-//     // Commit changes to disk
-//     int result = fs_commit_write(fs, manager->base_path);
-    
-//     if (result != 0) {
-//         response.status = -1;
-//         snprintf(response.error_msg, 512, "Failed to write to disk");
-//     } else {
-//         response.status = 0;
-//         snprintf(response.error_msg, 512, "Write completed successfully");
-//     }
-
-//     ss_send_to_client(client_fd, &response);
-//     ss_destroy_write_session(manager, client_fd);
-
-//     printf("[SS] WRITE_END: Completed write for file %s\n", session->filename);
-//     return 0;
-// }
-
 int ss_handle_write_end(int client_fd, ClientRequest *request, ClientManager *manager) {
     ClientRequest response;
     
@@ -665,43 +381,149 @@ int ss_handle_write_end(int client_fd, ClientRequest *request, ClientManager *ma
         return -1;
     }
 
-    // Final write of temp file
-    fs_write_to_disk(session->temp_fs, manager->base_path);
-
-    // ATOMIC RENAME: Move temp file to main file
-    char main_path[MAX_FILENAME * 2];
-    char temp_path[MAX_FILENAME * 2];
-    snprintf(main_path, sizeof(main_path), "%s/%s", manager->base_path, fs->filename);
-    snprintf(temp_path, sizeof(temp_path), "%s/%s", manager->base_path, fs->temp_filename);
-
-    // Atomic rename (this is the magic - either succeeds completely or not at all)
-    if (rename(temp_path, main_path) != 0) {
+    // CRITICAL FIX: Extract ALL modified sentences from temp file (not just one)
+    
+    pthread_rwlock_rdlock(&session->temp_fs->file_lock);
+    
+    // Count how many sentences exist in temp file starting from locked sentence
+    int temp_sentence_count = 0;
+    SentenceNode *temp_current = find_sentence(session->temp_fs, session->sentence_num);
+    while (temp_current) {
+        temp_sentence_count++;
+        temp_current = temp_current->next;
+    }
+    
+    // Deep copy ALL sentences from locked sentence onwards
+    SentenceNode **sentence_copies = (SentenceNode **)calloc(temp_sentence_count, sizeof(SentenceNode *));
+    if (!sentence_copies) {
+        pthread_rwlock_unlock(&session->temp_fs->file_lock);
         response.status = -1;
-        snprintf(response.error_msg, 512, "Failed to commit changes: %s", strerror(errno));
+        snprintf(response.error_msg, 512, "Memory allocation failed");
+        ss_send_to_client(client_fd, &response);
+        ss_destroy_write_session(manager, client_fd);
+        return -1;
+    }
+    
+    temp_current = find_sentence(session->temp_fs, session->sentence_num);
+    for (int i = 0; i < temp_sentence_count && temp_current; i++) {
+        pthread_rwlock_rdlock(&temp_current->lock);
+        
+        SentenceNode *sentence_copy = sentence_create('\0');
+        
+        // Copy delimiters
+        strncpy(sentence_copy->delimiters, temp_current->delimiters, MAX_WHITESPACE - 1);
+        sentence_copy->delimiters[MAX_WHITESPACE - 1] = '\0';
+        strncpy(sentence_copy->whitespace_after_delimiters, 
+               temp_current->whitespace_after_delimiters, MAX_WHITESPACE - 1);
+        sentence_copy->whitespace_after_delimiters[MAX_WHITESPACE - 1] = '\0';
+
+        // Copy all words
+        WordNode *word = temp_current->words;
+        while (word) {
+            WordNode *new_word = word_create(word->word);
+            if (new_word) {
+                strncpy(new_word->whitespace_after, word->whitespace_after, MAX_WHITESPACE - 1);
+                new_word->whitespace_after[MAX_WHITESPACE - 1] = '\0';
+                
+                // Append to sentence
+                if (!sentence_copy->words) {
+                    sentence_copy->words = new_word;
+                } else {
+                    WordNode *tail = sentence_copy->words;
+                    while (tail->next) tail = tail->next;
+                    tail->next = new_word;
+                }
+                sentence_copy->word_count++;
+            }
+            word = word->next;
+        }
+        
+        sentence_copies[i] = sentence_copy;
+        
+        pthread_rwlock_unlock(&temp_current->lock);
+        temp_current = temp_current->next;
+    }
+    
+    pthread_rwlock_unlock(&session->temp_fs->file_lock);
+
+    // Reload main file from disk (in case it was modified by another client)
+    pthread_rwlock_wrlock(&fs->file_lock);
+    
+    // Destroy old in-memory structure
+    SentenceNode *old_sentence = fs->sentences;
+    while (old_sentence) {
+        SentenceNode *next = old_sentence->next;
+        sentence_destroy(old_sentence);
+        old_sentence = next;
+    }
+    fs->sentences = NULL;
+    fs->sentence_count = 0;
+    
+    // Reload from disk
+    pthread_rwlock_unlock(&fs->file_lock);
+    fs_load_from_disk(fs, manager->base_path);
+    pthread_rwlock_wrlock(&fs->file_lock);
+
+    // Find insertion point in main file
+    SentenceNode *target_sentence = find_sentence(fs, session->sentence_num);
+    SentenceNode *prev_sentence = NULL;
+    
+    if (session->sentence_num > 0) {
+        prev_sentence = find_sentence(fs, session->sentence_num - 1);
+    }
+    
+    // Remove old sentences starting from locked sentence (they will be replaced)
+    if (target_sentence) {
+        // Find how many sentences to remove (same count as we're adding)
+        SentenceNode *to_remove = target_sentence;
+        for (int i = 0; i < temp_sentence_count && to_remove; i++) {
+            SentenceNode *next = to_remove->next;
+            
+            // Unlink and destroy
+            if (prev_sentence) {
+                prev_sentence->next = next;
+            } else {
+                fs->sentences = next;
+            }
+            
+            sentence_destroy(to_remove);
+            fs->sentence_count--;
+            
+            to_remove = next;
+        }
+    }
+    
+    // Insert all copied sentences at the locked position
+    for (int i = 0; i < temp_sentence_count; i++) {
+        if (!prev_sentence) {
+            // Insert at beginning
+            sentence_copies[i]->next = fs->sentences;
+            fs->sentences = sentence_copies[i];
+            prev_sentence = sentence_copies[i];
+        } else {
+            // Insert after prev_sentence
+            sentence_copies[i]->next = prev_sentence->next;
+            prev_sentence->next = sentence_copies[i];
+            prev_sentence = sentence_copies[i];
+        }
+        fs->sentence_count++;
+    }
+    
+    free(sentence_copies);
+    
+    // Write merged content back to disk
+    int write_result = fs_write_to_disk(fs, manager->base_path);
+    
+    if (write_result != 0) {
+        pthread_rwlock_unlock(&fs->file_lock);
+        response.status = -1;
+        snprintf(response.error_msg, 512, "Failed to write merged content to disk");
         ss_send_to_client(client_fd, &response);
         ss_destroy_write_session(manager, client_fd);
         return -1;
     }
 
-    // Reload main file structure from disk
-    pthread_rwlock_wrlock(&fs->file_lock);
-    
-    // Destroy old sentences
-    SentenceNode *current = fs->sentences;
-    while (current) {
-        SentenceNode *next = current->next;
-        sentence_destroy(current);
-        current = next;
-    }
-    fs->sentences = NULL;
-    fs->sentence_count = 0;
-    
-    // Reload from disk (now has new content)
-    pthread_rwlock_unlock(&fs->file_lock);
-    fs_load_from_disk(fs, manager->base_path);
-    
     // Clear write lock
-    pthread_rwlock_wrlock(&fs->file_lock);
     fs->has_active_write = 0;
     fs->write_user[0] = '\0';
     fs->temp_filename[0] = '\0';
@@ -714,6 +536,7 @@ int ss_handle_write_end(int client_fd, ClientRequest *request, ClientManager *ma
     
     ss_destroy_write_session(manager, client_fd);
 
-    printf("[SS] WRITE_END: Committed write for file %s\n", session->filename);
+    printf("[SS] WRITE_END: Committed write for file %s (%d sentences merged starting from sentence %d)\n", 
+           session->filename, temp_sentence_count, session->sentence_num);
     return 0;
 }
