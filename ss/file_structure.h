@@ -49,10 +49,16 @@ typedef struct FileStructure {
     // For undo functionality
     FileSnapshot *last_snapshot;
     
+    // Track active write with temp file
+    char temp_filename[MAX_FILENAME];  // Temp file being written
+    int has_active_write;  // Flag: is someone writing?
+    char write_user[64];   // Who is writing
+    int write_sentence;    // Which sentence
+    
     time_t last_modified;
     pthread_rwlock_t file_lock;
     
-    struct FileStructure *next;  // For hash table chaining
+    struct FileStructure *next;
 } FileStructure;
 
 // File manager - manages all files with a hash table
@@ -64,6 +70,10 @@ typedef struct FileManager {
 } FileManager;
 
 // ==================== Function Declarations ====================
+
+// Helper Functions (for internal use by write operations)
+SentenceNode* find_sentence(FileStructure *fs, int sentence_num);
+WordNode* find_word_at_position(SentenceNode *sentence, int position);
 
 // File Manager Operations
 int fm_init(FileManager *manager, const char *base_path, int table_size);

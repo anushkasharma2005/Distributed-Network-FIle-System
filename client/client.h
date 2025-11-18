@@ -16,7 +16,7 @@
 // Configuration
 #define MAX_COMMAND_LENGTH 1024
 #define MAX_FILENAME_LENGTH 256
-#define MAX_USERNAME_LENGTH 64
+// #define MAX_USERNAME_LENGTH 64
 #define STREAM_DELAY_MS 100000 // 0.1 seconds in microseconds
 
 // Error codes

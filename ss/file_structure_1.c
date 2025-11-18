@@ -616,10 +616,14 @@ int fs_write_to_disk(FileStructure *fs, const char *base_path) {
     char sentence_buffer[4096];
     SentenceNode *current = fs->sentences;
 
+    // NOTE: Caller must hold at least read lock on fs->file_lock
     while (current) {
+        // Read lock each sentence individually
+        pthread_rwlock_rdlock(&current->lock);
         sentence_to_string(current, sentence_buffer, sizeof(sentence_buffer));
-        fprintf(fp, "%s", sentence_buffer);
+        pthread_rwlock_unlock(&current->lock);
         
+        fprintf(fp, "%s", sentence_buffer);
         current = current->next;
     }
 
@@ -628,11 +632,47 @@ int fs_write_to_disk(FileStructure *fs, const char *base_path) {
     return 0;
 }
 
+// char* fs_read_all(FileStructure *fs, char *buffer, size_t buffer_size) {
+//     if (!fs || !buffer || buffer_size == 0) {
+//         return NULL;
+//     }
+
+//     // Read lock on file - allows concurrent reads
+//     pthread_rwlock_rdlock(&fs->file_lock);
+
+//     buffer[0] = '\0';
+//     size_t offset = 0;
+//     char sentence_buffer[4096];
+
+//     SentenceNode *current = fs->sentences;
+//     while (current && offset < buffer_size - 1) {
+//         // Read lock on each sentence individually
+//         pthread_rwlock_rdlock(&current->lock);
+        
+//         sentence_to_string(current, sentence_buffer, sizeof(sentence_buffer));
+        
+//         pthread_rwlock_unlock(&current->lock); // Release sentence lock immediately
+        
+//         sentence_to_string(current, sentence_buffer, sizeof(sentence_buffer));
+        
+//         int written = snprintf(buffer + offset, buffer_size - offset, "%s", sentence_buffer);
+//         if (written < 0 || written >= (int)(buffer_size - offset)) {
+//             break;
+//         }
+//         offset += written;
+//         current = current->next;
+//     }
+
+//     pthread_rwlock_unlock(&fs->file_lock);
+//     return buffer;
+// }
+
 char* fs_read_all(FileStructure *fs, char *buffer, size_t buffer_size) {
     if (!fs || !buffer || buffer_size == 0) {
         return NULL;
     }
 
+    // Read lock on file - allows concurrent reads
     pthread_rwlock_rdlock(&fs->file_lock);
 
     buffer[0] = '\0';
@@ -641,7 +681,15 @@ char* fs_read_all(FileStructure *fs, char *buffer, size_t buffer_size) {
 
     SentenceNode *current = fs->sentences;
     while (current && offset < buffer_size - 1) {
+        // Read lock on each sentence individually
+        pthread_rwlock_rdlock(&current->lock);
+        
         sentence_to_string(current, sentence_buffer, sizeof(sentence_buffer));
+        
+        pthread_rwlock_unlock(&current->lock); // Release sentence lock immediately
+        
+        // REMOVED: Don't call sentence_to_string again!
+        // sentence_to_string(current, sentence_buffer, sizeof(sentence_buffer));
         
         int written = snprintf(buffer + offset, buffer_size - offset, "%s", sentence_buffer);
         if (written < 0 || written >= (int)(buffer_size - offset)) {

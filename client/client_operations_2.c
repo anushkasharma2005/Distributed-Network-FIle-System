@@ -226,10 +226,21 @@ int cmd_write(Client *client, const char *filename, int sentence_num) {
     }
 
     if (resp.status != 0) {
-        fprintf(stderr, "Error: %s\n", resp.error_msg);
+        if (resp.status == -4) {
+            // Word index out of range - special handling
+            fprintf(stderr, "%s\n", resp.error_msg);
+            fprintf(stderr, "Hint: Word indices start at 0. Use valid range shown above.\n");
+        } else if (resp.status == -5) {
+            // Sentence index out of range
+            fprintf(stderr, "%s\n", resp.error_msg);
+            fprintf(stderr, "Hint: Use READ to view the file and see the current sentence count.\n");
+        } else {
+            fprintf(stderr, "%s\n", resp.error_msg);
+        }
         client_disconnect_from_ss(client);
         return ERR_SERVER_ERROR;
     }
+    
     printf("Write session started: %s\n", resp.error_msg);
 
     // Enter interactive write mode
@@ -324,9 +335,15 @@ int cmd_write(Client *client, const char *filename, int sentence_num) {
         }
 
         if (resp.status != 0) {
-            fprintf(stderr, "Error: %s\n", resp.error_msg);
-        } else {
-            printf("Success: %s\n", resp.error_msg);
+            if (resp.status == -5) {
+                // Sentence index out of range - special handling
+                fprintf(stderr, "%s\n", resp.error_msg);
+                fprintf(stderr, "Hint: Use READ to view the file and see the current sentence count.\n");
+            } else {
+                fprintf(stderr, "Error: %s\n", resp.error_msg);
+            }
+            client_disconnect_from_ss(client);
+            return ERR_SERVER_ERROR;
         }
     }
 

@@ -68,7 +68,7 @@ static SentenceNode* ensure_sentence_exists(FileStructure *fs, int sentence_num)
  * Find sentence at a specific position
  * NOTE: Caller must hold fs->file_lock (at least read lock)
  */
-static SentenceNode* find_sentence(FileStructure *fs, int sentence_num) {
+SentenceNode* find_sentence(FileStructure *fs, int sentence_num) {
     if (!fs || sentence_num < 0) {
         return NULL;
     }
@@ -88,7 +88,7 @@ static SentenceNode* find_sentence(FileStructure *fs, int sentence_num) {
  * Find the word at a specific position in a sentence
  * NOTE: Caller must hold sentence->lock (at least read lock)
  */
-static WordNode* find_word_at_position(SentenceNode *sentence, int position) {
+WordNode* find_word_at_position(SentenceNode *sentence, int position) {
     if (!sentence || position < 0) {
         return NULL;
     }
@@ -495,16 +495,42 @@ int fs_lock_sentence(FileStructure *fs, int sentence_num, const char *username) 
         return -1;
     }
 
-    // Write lock on file to potentially create sentence
-    pthread_rwlock_wrlock(&fs->file_lock);
+    // Read lock on file to check sentence count
+    pthread_rwlock_rdlock(&fs->file_lock);
 
-    // Ensure sentence exists
-    SentenceNode *sentence = ensure_sentence_exists(fs, sentence_num);
-    if (!sentence) {
+    // Check if sentence_num is within valid range
+    if (sentence_num > fs->sentence_count) {
         pthread_rwlock_unlock(&fs->file_lock);
-        fprintf(stderr, "[FS] Failed to create/access sentence %d in file %s\n", 
-                sentence_num, fs->filename);
-        return -1;
+        fprintf(stderr, "[FS] ERROR: Sentence index %d out of range (file has %d sentences, valid range is 0-%d)\n", 
+                sentence_num, fs->sentence_count, 
+                fs->sentence_count);
+        return -5;  // Sentence index out of range
+    }
+
+    // Find or create the sentence
+    SentenceNode *sentence = NULL;
+
+    if (sentence_num == fs->sentence_count) {
+        // Need to create a new sentence at the end
+        pthread_rwlock_unlock(&fs->file_lock);
+        pthread_rwlock_wrlock(&fs->file_lock);  // Upgrade to write lock
+        
+        sentence = ensure_sentence_exists(fs, sentence_num);
+        if (!sentence) {
+            pthread_rwlock_unlock(&fs->file_lock);
+            fprintf(stderr, "[FS] ERROR: Failed to create sentence %d in file %s\n", 
+                    sentence_num, fs->filename);
+            return -1;
+        }
+    } else {
+        // Sentence should exist, just find it
+        sentence = find_sentence(fs, sentence_num);
+        if (!sentence) {
+            pthread_rwlock_unlock(&fs->file_lock);
+            fprintf(stderr, "[FS] ERROR: Failed to access sentence %d in file %s\n", 
+                    sentence_num, fs->filename);
+            return -1;
+        }
     }
 
     // Write lock on sentence to check and modify lock state
@@ -572,25 +598,27 @@ int fs_write_word(FileStructure *fs, int sentence_num, int word_index,
         return -1;
     }
 
-    // Write lock on file for potential sentence creation and traversal
-    pthread_rwlock_wrlock(&fs->file_lock);
+    // Read lock on file for sentence access (lightweight check)
+    pthread_rwlock_rdlock(&fs->file_lock);
 
-    // Find/create the starting sentence
+    // Find the starting sentence - DO NOT CREATE if it doesn't exist
     SentenceNode *start_sentence = find_sentence(fs, sentence_num);
     if (!start_sentence) {
         pthread_rwlock_unlock(&fs->file_lock);
-        fprintf(stderr, "[FS] Sentence %d not found\n", sentence_num);
+        fprintf(stderr, "[FS] ERROR: Sentence index %d out of range (file has %d sentences)\n", 
+                sentence_num, fs->sentence_count);
         free_parsed_content(parsed);
-        return -1;
+        return -5;  // New error code for out of range
     }
 
-    // Write lock on starting sentence for modification
+    // Write lock on starting sentence ONLY for modification
     pthread_rwlock_wrlock(&start_sentence->lock);
+    pthread_rwlock_unlock(&fs->file_lock); // Release file lock immediately
 
     // Check if sentence is locked by this user
     if (!start_sentence->locked_for_write) {
         pthread_rwlock_unlock(&start_sentence->lock);
-        pthread_rwlock_unlock(&fs->file_lock);
+        // pthread_rwlock_unlock(&fs->file_lock);
         fprintf(stderr, "[FS] Sentence %d is not locked\n", sentence_num);
         free_parsed_content(parsed);
         return -2;
@@ -598,7 +626,7 @@ int fs_write_word(FileStructure *fs, int sentence_num, int word_index,
 
     if (strcmp(start_sentence->locked_by, username) != 0) {
         pthread_rwlock_unlock(&start_sentence->lock);
-        pthread_rwlock_unlock(&fs->file_lock);
+        // pthread_rwlock_unlock(&fs->file_lock);
         fprintf(stderr, "[FS] Sentence %d is locked by %s, not %s\n", 
                 sentence_num, start_sentence->locked_by, username);
         free_parsed_content(parsed);
@@ -608,7 +636,7 @@ int fs_write_word(FileStructure *fs, int sentence_num, int word_index,
     // Validate word_index for the starting sentence
     if (word_index > start_sentence->word_count) {
         pthread_rwlock_unlock(&start_sentence->lock);
-        pthread_rwlock_unlock(&fs->file_lock);
+        // pthread_rwlock_unlock(&fs->file_lock);
         fprintf(stderr, "[FS] Word index %d out of range (sentence has %d words, valid range is 0-%d)\n", 
                 word_index, start_sentence->word_count, start_sentence->word_count);
         free_parsed_content(parsed);
@@ -695,12 +723,15 @@ int fs_write_word(FileStructure *fs, int sentence_num, int word_index,
             // Unlock current sentence before moving to next
             pthread_rwlock_unlock(&current_sentence->lock);
             
+            // Need file write lock to create new sentence
+            pthread_rwlock_wrlock(&fs->file_lock);
             // Move to next sentence in file structure (or create it)
             current_sentence_num++;
             SentenceNode *next_sentence = ensure_sentence_exists(fs, current_sentence_num);
+            pthread_rwlock_unlock(&fs->file_lock); // Release immediately after creation
             
             if (!next_sentence) {
-                pthread_rwlock_unlock(&fs->file_lock);
+                // pthread_rwlock_unlock(&fs->file_lock);
                 fprintf(stderr, "[FS] Failed to create sentence %d\n", current_sentence_num);
                 free_parsed_content(parsed);
                 return -1;
@@ -718,7 +749,7 @@ int fs_write_word(FileStructure *fs, int sentence_num, int word_index,
 
     // Unlock the last sentence we worked on
     pthread_rwlock_unlock(&current_sentence->lock);
-    pthread_rwlock_unlock(&fs->file_lock);
+    // pthread_rwlock_unlock(&fs->file_lock);
 
     free_parsed_content(parsed);
 
@@ -732,16 +763,18 @@ int fs_commit_write(FileStructure *fs, const char *base_path) {
         return -1;
     }
 
-    // Write lock the entire file during commit (disk I/O)
-    pthread_rwlock_wrlock(&fs->file_lock);
-
+    // Only need read lock to read data for writing to disk
+    // Write lock only needed to update last_modified timestamp
+    pthread_rwlock_rdlock(&fs->file_lock);
     int result = fs_write_to_disk(fs, base_path);
+    pthread_rwlock_unlock(&fs->file_lock);
     
     if (result == 0) {
+        // Briefly acquire write lock just to update timestamp
+        pthread_rwlock_wrlock(&fs->file_lock);
         fs->last_modified = time(NULL);
+        pthread_rwlock_unlock(&fs->file_lock);
     }
-
-    pthread_rwlock_unlock(&fs->file_lock);
 
     return result;
 }
