@@ -30,6 +30,21 @@ typedef struct SentenceNode {
     struct SentenceNode *next;
 } SentenceNode;
 
+// Checkpoint node - represents a saved state of a file
+typedef struct CheckpointNode {
+    char tag[64];                    // Checkpoint identifier
+    SentenceNode *sentences;         // Saved file content
+    time_t timestamp;                // When checkpoint was created
+    struct CheckpointNode *next;     // Next checkpoint
+} CheckpointNode;
+
+// Checkpoint list - manages all checkpoints for a file
+typedef struct CheckpointList {
+    CheckpointNode *head;
+    int count;
+    pthread_mutex_t lock;           // Lock for checkpoint operations
+} CheckpointList;
+
 // File snapshot for undo
 typedef struct FileSnapshot {
     SentenceNode *sentences;
@@ -59,6 +74,7 @@ typedef struct FileStructure {
     pthread_rwlock_t file_lock;
     
     struct FileStructure *next;
+    CheckpointList checkpoints;
 } FileStructure;
 
 // File manager - manages all files with a hash table
@@ -116,5 +132,16 @@ int fs_commit_write(FileStructure *fs, const char *base_path);
 SentenceNode* fs_deep_copy_sentences(SentenceNode *original);
 int fs_create_snapshot(FileStructure *fs, const char *username);
 int fs_undo(FileStructure *fs, const char *base_path);
+
+// ==================== Checkpoint Operations ====================
+int checkpoint_init(CheckpointList *list);
+void checkpoint_cleanup(CheckpointList *list);
+int checkpoint_create(FileStructure *fs, const char *tag);
+CheckpointNode* checkpoint_find(CheckpointList *list, const char *tag);
+char* checkpoint_view(FileStructure *fs, const char *tag, char *buffer, size_t buffer_size);
+int checkpoint_revert(FileStructure *fs, const char *tag, const char *base_path);
+char* checkpoint_list(FileStructure *fs, char *buffer, size_t buffer_size);
+int checkpoint_save_to_disk(FileStructure *fs, const char *base_path);
+int checkpoint_load_from_disk(FileStructure *fs, const char *base_path);
 
 #endif // FILE_STRUCTURE_H

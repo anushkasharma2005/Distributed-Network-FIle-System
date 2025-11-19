@@ -115,6 +115,20 @@ int main(int argc, char *argv[])
         case MSG_EXEC:
             result = cmd_exec(&client, cmd.filename);
             break;
+
+        case MSG_CHECKPOINT:
+            result = cmd_checkpoint(&client, cmd.filename, cmd.content);
+            break;
+        case MSG_VIEWCHECKPOINT:
+            result = cmd_viewcheckpoint(&client, cmd.filename, cmd.content);
+            break;
+        case MSG_REVERT:
+            result = cmd_revert(&client, cmd.filename, cmd.content);
+            break;
+        case MSG_LISTCHECKPOINTS:
+            result = cmd_listcheckpoints(&client, cmd.filename);
+            break;
+
         default:
             fprintf(stderr, "Unknown command type\n");
         }
@@ -149,6 +163,11 @@ void print_help()
     printf("  ADDACCESS -R <file> <user> - Grant read access\n");
     printf("  ADDACCESS -W <file> <user> - Grant write access\n");
     printf("  REMACCESS <file> <user>    - Remove all access\n\n");
+    printf("Checkpoint Operations:\n");
+    printf("  CHECKPOINT <file> <tag>       - Create a checkpoint with given tag\n");
+    printf("  VIEWCHECKPOINT <file> <tag>   - View checkpoint content\n");
+    printf("  REVERT <file> <tag>           - Revert file to checkpoint\n");
+    printf("  LISTCHECKPOINTS <file>        - List all checkpoints for file\n\n");
     printf("Other:\n");
     printf("  help                    - Show this help message\n");
     printf("  exit                    - Exit the client\n\n");

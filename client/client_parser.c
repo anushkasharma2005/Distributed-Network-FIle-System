@@ -217,6 +217,67 @@ int parse_command(const char *input, Command *cmd) {
         return SUCCESS;
     }
 
+    if (strcmp(command, "CHECKPOINT") == 0) {
+        cmd->type = MSG_CHECKPOINT;
+        token = strtok(NULL, " \t");
+        if (!token) {
+            return ERR_INVALID_COMMAND;
+        }
+        strncpy(cmd->filename, token, MAX_FILENAME_LENGTH - 1);
+        
+        token = strtok(NULL, " \t");
+        if (!token) {
+            return ERR_INVALID_COMMAND;
+        }
+        strncpy(cmd->content, token, sizeof(cmd->content) - 1);
+        return SUCCESS;
+    }
+
+    // Parse VIEWCHECKPOINT command
+    if (strcmp(command, "VIEWCHECKPOINT") == 0) {
+        cmd->type = MSG_VIEWCHECKPOINT;
+        token = strtok(NULL, " \t");
+        if (!token) {
+            return ERR_INVALID_COMMAND;
+        }
+        strncpy(cmd->filename, token, MAX_FILENAME_LENGTH - 1);
+        
+        token = strtok(NULL, " \t");
+        if (!token) {
+            return ERR_INVALID_COMMAND;
+        }
+        strncpy(cmd->content, token, sizeof(cmd->content) - 1);
+        return SUCCESS;
+    }
+
+    // Parse REVERT command
+    if (strcmp(command, "REVERT") == 0) {
+        cmd->type = MSG_REVERT;
+        token = strtok(NULL, " \t");
+        if (!token) {
+            return ERR_INVALID_COMMAND;
+        }
+        strncpy(cmd->filename, token, MAX_FILENAME_LENGTH - 1);
+        
+        token = strtok(NULL, " \t");
+        if (!token) {
+            return ERR_INVALID_COMMAND;
+        }
+        strncpy(cmd->content, token, sizeof(cmd->content) - 1);
+        return SUCCESS;
+    }
+
+    // Parse LISTCHECKPOINTS command
+    if (strcmp(command, "LISTCHECKPOINTS") == 0) {
+        cmd->type = MSG_LISTCHECKPOINTS;
+        token = strtok(NULL, " \t");
+        if (!token) {
+            return ERR_INVALID_COMMAND;
+        }
+        strncpy(cmd->filename, token, MAX_FILENAME_LENGTH - 1);
+        return SUCCESS;
+    }
+
     return ERR_INVALID_COMMAND;
 }
 

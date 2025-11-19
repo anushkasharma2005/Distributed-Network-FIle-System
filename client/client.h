@@ -44,6 +44,10 @@
 #define MSG_ADD_ACCESS 11
 #define MSG_REM_ACCESS 12
 #define MSG_EXEC 13
+#define MSG_CHECKPOINT 14
+#define MSG_VIEWCHECKPOINT 15
+#define MSG_REVERT 16
+#define MSG_LISTCHECKPOINTS 17
 
 // Client structure
 typedef struct
@@ -98,6 +102,10 @@ int cmd_list_users(Client *client);
 int cmd_add_access(Client *client, const char *filename, const char *username, bool write_access);
 int cmd_rem_access(Client *client, const char *filename, const char *username);
 int cmd_exec(Client *client, const char *filename);
+int cmd_checkpoint(Client *client, const char *filename, const char *tag);
+int cmd_viewcheckpoint(Client *client, const char *filename, const char *tag);
+int cmd_revert(Client *client, const char *filename, const char *tag);
+int cmd_listcheckpoints(Client *client, const char *filename);
 
 // Helper functions
 int send_to_nm(Client *client, const void *data, size_t len);

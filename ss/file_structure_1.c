@@ -324,7 +324,14 @@ FileStructure* fs_create(const char *filename, const char *owner) {
     fs->last_modified = time(NULL);
     fs->next = NULL;
 
+    // Initialize checkpoint list - ADD THIS
+    if (checkpoint_init(&fs->checkpoints) != 0) {
+        free(fs);
+        return NULL;
+    }
+    
     if (pthread_rwlock_init(&fs->file_lock, NULL) != 0) {
+        checkpoint_cleanup(&fs->checkpoints); 
         free(fs);
         return NULL;
     }
@@ -356,6 +363,8 @@ void fs_destroy(FileStructure *fs) {
         free(fs->last_snapshot);
     }
 
+    checkpoint_cleanup(&fs->checkpoints);
+
     pthread_rwlock_destroy(&fs->file_lock);
     free(fs);
 }
@@ -371,6 +380,7 @@ int fs_load_from_disk(FileStructure *fs, const char *base_path) {
     FILE *fp = fopen(file_path, "r");
     if (!fp) {
         // File doesn't exist yet, that's okay
+        checkpoint_load_from_disk(fs, base_path);
         return 0;
     }
 
@@ -381,6 +391,7 @@ int fs_load_from_disk(FileStructure *fs, const char *base_path) {
 
     if (file_size <= 0) {
         fclose(fp);
+        checkpoint_load_from_disk(fs, base_path);
         return 0;
     }
 
@@ -398,6 +409,8 @@ int fs_load_from_disk(FileStructure *fs, const char *base_path) {
     fs_parse_content(fs, content);
     free(content);
 
+    checkpoint_load_from_disk(fs, base_path);
+    
     printf("[FS] Loaded file from disk: %s (%d sentences)\n", 
            fs->filename, fs->sentence_count);
     return 0;

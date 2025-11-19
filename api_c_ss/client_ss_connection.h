@@ -24,6 +24,10 @@ typedef enum
     OP_WRITE_END = 5,
     OP_STREAM = 6,
     OP_UNDO = 7,
+    OP_CHECKPOINT = 8,
+    OP_VIEWCHECKPOINT = 9,
+    OP_REVERT = 10,
+    OP_LISTCHECKPOINTS = 11,
     OP_ACK = 100,
     OP_ERROR = 101,
     OP_STOP = 102
@@ -151,5 +155,11 @@ WriteSession* ss_create_write_session(ClientManager *manager, int client_fd,
 WriteSession* ss_find_write_session(ClientManager *manager, int client_fd);
 void ss_destroy_write_session(ClientManager *manager, int client_fd);
 void ss_cleanup_client_manager(ClientManager *manager);
+
+// Add checkpoint operation handlers
+int ss_handle_checkpoint(int client_fd, ClientRequest *request, ClientManager *manager);
+int ss_handle_viewcheckpoint(int client_fd, ClientRequest *request, ClientManager *manager);
+int ss_handle_revert(int client_fd, ClientRequest *request, ClientManager *manager);
+int ss_handle_listcheckpoints(int client_fd, ClientRequest *request, ClientManager *manager);
 
 #endif // CLIENT_SS_CONNECTION_H

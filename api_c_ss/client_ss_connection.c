@@ -332,6 +332,26 @@ void *ss_client_handler(void *arg) {
                 ss_handle_undo(thread_data->client_fd, &request, manager);
                 break;
             
+            case OP_CHECKPOINT:
+                ss_handle_checkpoint(thread_data->client_fd, &request, manager);
+                break;
+            
+            case OP_VIEWCHECKPOINT:
+                ss_handle_viewcheckpoint(thread_data->client_fd, &request, manager);
+                break;
+            
+            case OP_REVERT:
+                ss_handle_revert(thread_data->client_fd, &request, manager);
+                break;
+            
+            case OP_LISTCHECKPOINTS:
+                ss_handle_listcheckpoints(thread_data->client_fd, &request, manager);
+                break;
+            
+            case OP_STOP:
+                keep_running = 0;
+                break;
+            
             default:
                 printf("[SS] Thread %d: Unknown operation type %d\n",
                        thread_data->thread_id, request.op_type);
