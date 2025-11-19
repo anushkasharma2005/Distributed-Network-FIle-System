@@ -92,5 +92,16 @@ void handle_addaccess_command(int client_fd, const char* file_path,
  */
 void handle_remaccess_command(int client_fd, const char* file_path, 
                               const char* username, const char* requester);
+
                               
+/**
+ * Handle VIEW command
+ * @param client_fd Client socket
+ * @param flags String containing flags (e.g., "-a", "-l", "-al")
+ * @param username Username of requester
+ */
+void handle_view_command(int client_fd, const char* flags, const char* username);
+
+
+
 #endif // CLIENT_COMMANDS_H

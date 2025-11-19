@@ -29,6 +29,9 @@ typedef struct FileInfo {
     int write_count;
     int write_capacity;
 
+    int word_count;      // -1 means N/A
+    int char_count;      // -1 means N/A
+
 } FileInfo;
 
 /**
@@ -162,5 +165,15 @@ bool is_file_owner(const char* file_path, const char* username);
  */
 int format_access_list(FileInfo* file_info, char* buffer, size_t buffer_size);
 
+
+/**
+ * Get all files user has access to
+ * @param username Username to check
+ * @param files Array to store FileInfo pointers (don't free these)
+ * @param max_size Maximum array size
+ * @param include_all If true, return all files regardless of access
+ * @return Number of files
+ */
+int get_accessible_files(const char* username, FileInfo** files, int max_size, bool include_all);
 
 #endif // FILE_REGISTRY_H

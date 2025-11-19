@@ -97,8 +97,9 @@ int register_file(const char* file_path, int ss_id, const char* ss_ip, int ss_cl
     new_node->value->read_capacity = MAX_ACCESS_USERS;
     new_node->value->write_count = 0;
     new_node->value->write_capacity = MAX_ACCESS_USERS;
+    new_node->value->word_count = -1;
+    new_node->value->char_count = -1;
     
-
     
     // Insert at head
     new_node->next = file_registry.buckets[index];
@@ -559,4 +560,94 @@ int format_access_list(FileInfo* file_info, char* buffer, size_t buffer_size) {
     }
     
     return offset;
+}
+
+int get_accessible_files(const char* username, FileInfo** files, int max_size, bool include_all) {
+    if (!files || max_size <= 0) return 0;
+    
+    // // ADD DEBUG
+    // printf("[DEBUG][GET_FILES] Called with username='%s', include_all=%d\n", 
+    //        username, include_all);
+    
+    pthread_mutex_lock(&file_registry.mutex);
+    
+    int count = 0;
+    int total_active = 0;  // ADD: Count total active files
+    
+    // Scan all buckets
+    for (int i = 0; i < FILE_HASH_TABLE_SIZE && count < max_size; i++) {
+        FileHashNode* current = file_registry.buckets[i];
+        
+        while (current != NULL && count < max_size) {
+            FileInfo* file = current->value;
+            
+            // // ADD DEBUG: Print each file examined
+            // printf("[DEBUG][GET_FILES] Examining file: '%s', is_active=%d, owner='%s'\n",
+            //        file->file_path, file->is_active, file->owner);
+            
+            // Skip inactive files
+            if (!file->is_active) {
+                // printf("[DEBUG][GET_FILES]   -> Skipped (inactive)\n");
+                current = current->next;
+                continue;
+            }
+            
+            total_active++;  // ADD: Count active files
+            
+            // If include_all flag, add all active files
+            if (include_all) {
+                // printf("[DEBUG][GET_FILES]   -> Added (include_all=true)\n");
+                files[count++] = file;
+                current = current->next;
+                continue;
+            }
+            
+            // Otherwise, check if user has access
+            bool has_access = false;
+            
+            // Check if owner
+            if (strcmp(file->owner, username) == 0) {
+                has_access = true;
+                // printf("[DEBUG][GET_FILES]   -> Has access (owner)\n");
+            }
+            
+            // Check read_users
+            if (!has_access) {
+                for (int j = 0; j < file->read_count; j++) {
+                    if (strcmp(file->read_users[j], username) == 0) {
+                        has_access = true;
+                        // printf("[DEBUG][GET_FILES]   -> Has access (read_users)\n");
+                        break;
+                    }
+                }
+            }
+            
+            // Check write_users
+            if (!has_access) {
+                for (int j = 0; j < file->write_count; j++) {
+                    if (strcmp(file->write_users[j], username) == 0) {
+                        has_access = true;
+                        // printf("[DEBUG][GET_FILES]   -> Has access (write_users)\n");
+                        break;
+                    }
+                }
+            }
+            
+            if (has_access) {
+                files[count++] = file;
+            } else {
+                // printf("[DEBUG][GET_FILES]   -> Skipped (no access)\n");
+            }
+            
+            current = current->next;
+        }
+    }
+    
+    pthread_mutex_unlock(&file_registry.mutex);
+    
+    // ADD DEBUG
+    // printf("[DEBUG][GET_FILES] Returning %d files (total_active=%d, include_all=%d)\n",
+        //    count, total_active, include_all);
+    
+    return count;
 }
