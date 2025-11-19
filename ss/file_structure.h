@@ -74,6 +74,7 @@ typedef struct FileManager {
 // Helper Functions (for internal use by write operations)
 SentenceNode* find_sentence(FileStructure *fs, int sentence_num);
 WordNode* find_word_at_position(SentenceNode *sentence, int position);
+SentenceNode* ensure_sentence_exists(FileStructure *fs, int sentence_num);  // ADD THIS
 
 // File Manager Operations
 int fm_init(FileManager *manager, const char *base_path, int table_size);

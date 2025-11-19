@@ -215,9 +215,11 @@ void handle_create_command(int client_fd, const char* file_path, const char* own
         handle_info_command(client_fd, file_path);
 
     }else if (strcmp(command, "READ") == 0 || 
-               strcmp(command, "DELETE") == 0) {
+               strcmp(command, "DELETE") == 0  ||
+               strcmp(command, "UNDO") == 0 ||
+               strcmp(command, "STREAM") == 0) {
 
-        // If the request is READ/WRITE/DELETE/INFO then handle file operation command. 
+        // If the request is READ/DELETE/UNDO then handle file operation command. 
         handle_file_operation_command(client_fd, file_path, command);
     } else {
         const char* response = "ERROR: Unknown command";

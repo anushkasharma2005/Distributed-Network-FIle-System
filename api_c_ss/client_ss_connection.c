@@ -250,87 +250,43 @@ int ss_handle_undo(int client_fd, ClientRequest *request, ClientManager *manager
         return -1;
     }
 
+    // **CHECK: Does snapshot exist?**
+    pthread_rwlock_rdlock(&fs->file_lock);
+    int has_snapshot = (fs->last_snapshot != NULL);
+    char modified_by[64] = {0};
+    if (has_snapshot) {
+        strncpy(modified_by, fs->last_snapshot->modified_by, 63);
+    }
+    pthread_rwlock_unlock(&fs->file_lock);
+
+    if (!has_snapshot) {
+        response.status = -1;
+        snprintf(response.error_msg, 512, 
+                "ERROR: No changes to undo. File has not been modified since last undo or server start.");
+        ss_send_to_client(client_fd, &response);
+        return -1;
+    }
+
     // Perform undo
     int result = fs_undo(fs, manager->base_path);
     
     if (result != 0) {
         response.status = -1;
-        snprintf(response.error_msg, 512, "Undo failed - no snapshot available");
+        snprintf(response.error_msg, 512, "ERROR: Undo operation failed");
     } else {
         response.status = 0;
-        snprintf(response.error_msg, 512, "Undo successful");
+        snprintf(response.error_msg, 512, 
+                "SUCCESS: Undone changes made by '%s'. File reverted to previous state.",
+                modified_by);
     }
 
     ss_send_to_client(client_fd, &response);
-    printf("[SS] UNDO completed for file: %s\n", request->filename);
+    printf("[SS] UNDO completed for file: %s (by %s, reverted %s's changes)\n", 
+           request->filename, request->username, modified_by);
     return 0;
 }
 
 // ==================== Client Handler Thread ====================
-
-// void *ss_client_handler(void *arg) {
-//     ClientThreadData *thread_data = (ClientThreadData *)arg;
-//     ClientRequest request;
-//     ClientManager *manager = (ClientManager *)((char *)arg - 
-//                               offsetof(ClientManager, clients) - 
-//                               thread_data->thread_id * sizeof(ClientThreadData));
-    
-//     printf("[SS] Thread %d: Handling client %s:%d\n", 
-//            thread_data->thread_id, thread_data->client_ip, thread_data->client_port);
-
-//     while (thread_data->active && keep_running) {
-//         // Receive request from client
-//         if (ss_receive_from_client(thread_data->client_fd, &request) < 0) {
-//             printf("[SS] Thread %d: Client disconnected\n", thread_data->thread_id);
-//             break;
-//         }
-
-//         printf("[SS] Thread %d: Received operation type %d for file %s\n",
-//                thread_data->thread_id, request.op_type, request.filename);
-
-//         // Handle request based on operation type
-//         switch (request.op_type) {
-//             case OP_READ:
-//                 ss_handle_read(thread_data->client_fd, &request, manager);
-//                 break;
-            
-//             case OP_WRITE_BEGIN:
-//                 ss_handle_write_begin(thread_data->client_fd, &request, manager);
-//                 break;
-            
-//             case OP_WRITE_UPDATE:
-//                 ss_handle_write_update(thread_data->client_fd, &request, manager);
-//                 break;
-            
-//             case OP_WRITE_END:
-//                 ss_handle_write_end(thread_data->client_fd, &request, manager);
-//                 break;
-            
-//             case OP_STREAM:
-//                 ss_handle_stream(thread_data->client_fd, &request, manager);
-//                 break;
-            
-//             case OP_UNDO:
-//                 ss_handle_undo(thread_data->client_fd, &request, manager);
-//                 break;
-            
-//             default:
-//                 printf("[SS] Thread %d: Unknown operation type %d\n",
-//                        thread_data->thread_id, request.op_type);
-//                 break;
-//         }
-//     }
-
-//     // Cleanup any active write sessions for this client
-//     ss_destroy_write_session(manager, thread_data->client_fd);
-
-//     // Cleanup
-//     close(thread_data->client_fd);
-//     thread_data->active = 0;
-    
-//     printf("[SS] Thread %d: Exiting\n", thread_data->thread_id);
-//     return NULL;
-// }
 
 void *ss_client_handler(void *arg) {
     ClientThreadData *thread_data = (ClientThreadData *)arg;
@@ -393,77 +349,6 @@ void *ss_client_handler(void *arg) {
     printf("[SS] Thread %d: Exiting\n", thread_data->thread_id);
     return NULL;
 }
-
-// int ss_accept_clients(int listen_fd, ClientManager *manager) {
-//     struct sockaddr_in client_addr;
-//     socklen_t addr_len = sizeof(client_addr);
-//     int client_fd;
-
-//     // Set socket to non-blocking mode
-//     int flags = fcntl(listen_fd, F_GETFL, 0);
-//     fcntl(listen_fd, F_SETFL, flags | O_NONBLOCK);
-
-//     while (keep_running) {
-//         // Accept new client connection
-//         client_fd = accept(listen_fd, (struct sockaddr *)&client_addr, &addr_len);
-//         if (client_fd < 0) {
-//             if (errno == EAGAIN || errno == EWOULDBLOCK) {
-//                 // No pending connections, sleep briefly and check keep_running
-//                 usleep(100000); // 100ms
-//                 continue;
-//             }
-//             perror("[SS] Accept failed");
-//             continue;
-//         }
-
-//         // Lock manager for thread creation
-//         pthread_mutex_lock(&manager->lock);
-
-//         // Find free slot
-//         int thread_id = -1;
-//         for (int i = 0; i < MAX_CLIENTS; i++) {
-//             if (!manager->clients[i].active) {
-//                 thread_id = i;
-//                 break;
-//             }
-//         }
-
-//         if (thread_id == -1) {
-//             printf("[SS] Maximum clients reached, rejecting connection\n");
-//             close(client_fd);
-//             pthread_mutex_unlock(&manager->lock);
-//             continue;
-//         }
-
-//         // Setup thread data
-//         manager->clients[thread_id].client_fd = client_fd;
-//         manager->clients[thread_id].thread_id = thread_id;
-//         manager->clients[thread_id].active = 1;
-//         manager->clients[thread_id].client_port = ntohs(client_addr.sin_port);
-//         inet_ntop(AF_INET, &client_addr.sin_addr, 
-//                   manager->clients[thread_id].client_ip, 16);
-
-//         // Create thread
-//         if (pthread_create(&manager->clients[thread_id].thread, NULL, 
-//                           ss_client_handler, manager) != 0) {
-//             perror("[SS] Thread creation failed");
-//             close(client_fd);
-//             manager->clients[thread_id].active = 0;
-//         } else {
-//             pthread_detach(manager->clients[thread_id].thread);
-//             manager->client_count++;
-//             printf("[SS] Accepted client %s:%d (Thread %d, Total: %d)\n",
-//                    manager->clients[thread_id].client_ip,
-//                    manager->clients[thread_id].client_port,
-//                    thread_id, manager->client_count);
-//         }
-
-//         printf("[SS] Exiting accept loop due to shutdown signal\n");
-//         pthread_mutex_unlock(&manager->lock);
-//     }
-
-//     return 0;
-// }
 
 int ss_accept_clients(int listen_fd, ClientManager *manager) {
     struct sockaddr_in client_addr;
