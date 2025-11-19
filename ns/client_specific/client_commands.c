@@ -149,9 +149,9 @@ void handle_create_command(int client_fd, const char* file_path, const char* own
 }
 
 /**
- * Handle READ/WRITE/DELETE/INFO commands from client
+ * Handle READ/STREAM/UNDO commands from client
  */
- void handle_file_operation_command(int client_fd, const char* file_path, const char* command) {
+void handle_file_operation_command(int client_fd, const char* file_path, const char* command) {
     FileInfo* file_info = find_file(file_path);
     
     if (file_info == NULL || !file_info->is_active) {
@@ -175,10 +175,10 @@ void handle_create_command(int client_fd, const char* file_path, const char* own
  * Parse and dispatch client command
  */
  void process_client_command(int client_fd, const char* buffer, Connection client_conn, const char* username) {
-    char command[32], file_path[256];
+    char command[32], arg1[256],  arg2[256], arg3[256];
     
 
-    int parsed = sscanf(buffer, "%s %s", command, file_path);
+    int parsed = sscanf(buffer, "%s %s %s %s", command, arg1, arg2, arg3);
 
     printf("[NS-Client][Client_commands]\n");
     printf("\n┌─ Client Request from '%s' (%s:%d) ─────\n",
@@ -193,19 +193,49 @@ void handle_create_command(int client_fd, const char* file_path, const char* own
     }
     
 
+    // ADDACCESS: arg1=filename, arg2=username, arg3=access_type
+    if (strcmp(command, "ADDACCESS") == 0) {
+        if (parsed < 4) {
+            send_message(client_fd, "ERROR: Usage: ADDACCESS <filename> <username> <R|W>");
+            return;
+        }
+        handle_addaccess_command(client_fd, arg1, arg2, arg3[0], username);
+        return;
+    }
+    
+    // REMACCESS: arg1=filename, arg2=username
+    if (strcmp(command, "REMACCESS") == 0) {
+        if (parsed < 3) {
+            send_message(client_fd, "ERROR: Usage: REMACCESS <filename> <username>");
+            return;
+        }
+        handle_remaccess_command(client_fd, arg1, arg2, username);
+        return;
+    }
+
+
     if (parsed < 2) {
         const char* error = "ERROR: Invalid command format";
         send_message(client_fd, error);
         return;
     }
     
-  
+    // For clarity, create file_path alias pointing to arg1
+    const char* file_path = arg1;   
+
+    
     if (strcmp(command, "CREATE") == 0) {
 
         // If the request is CREATE then handle create command
         handle_create_command(client_fd, file_path,username);
 
     }else if (strcmp(command, "WRITE_LOCK") == 0) {
+
+        if (!has_write_access(file_path, username)) {
+            send_message(client_fd, "ERROR: Write access denied");
+            printf("[NS-Client][WRITE] ✗ Write access denied for '%s' by '%s'\n", file_path, username);
+            return;
+        }
 
         handle_write_command(client_fd, file_path);
 
@@ -214,14 +244,36 @@ void handle_create_command(int client_fd, const char* file_path, const char* own
         // If the request is INFO then handle file operation command. 
         handle_info_command(client_fd, file_path);
 
+    }else if (strcmp(command, "DELETE") == 0) {
+        // Only owner can delete
+        if (!is_file_owner(file_path, username)) {
+            send_message(client_fd, "ERROR: Only file owner can delete");
+            return;
+        }
+        handle_file_operation_command(client_fd, file_path, command);
+
+
     }else if (strcmp(command, "READ") == 0 || 
-               strcmp(command, "DELETE") == 0  ||
-               strcmp(command, "UNDO") == 0 ||
                strcmp(command, "STREAM") == 0) {
 
-        // If the request is READ/DELETE/UNDO then handle file operation command. 
+        if (!has_read_access(file_path, username)) {
+            send_message(client_fd, "ERROR: Read access denied");
+            printf("[NS-Client][READ] ✗ Read access denied for '%s' by '%s'\n", file_path, username);
+            return;
+        }
+
+        // If the request is READ/STREAM then handle file operation command. 
         handle_file_operation_command(client_fd, file_path, command);
-    } else {
+    }else if ( strcmp(command, "UNDO") == 0) {
+
+        if (!has_write_access(file_path, username)) {
+            send_message(client_fd, "ERROR: Undo access denied");
+            printf("[NS-Client][WRITE] ✗ Undo access denied for '%s' by '%s'\n", file_path, username);
+            return;
+        }
+        
+        handle_file_operation_command(client_fd, file_path, command);
+    }else {
         const char* response = "ERROR: Unknown command";
         send_message(client_fd, response);
     }
@@ -328,6 +380,12 @@ void handle_info_command(int client_fd, const char* file_path) {
     
     strftime(created_str, sizeof(created_str), "%Y-%m-%d %H:%M", created_tm);
     strftime(accessed_str, sizeof(accessed_str), "%Y-%m-%d %H:%M", accessed_tm);
+
+    char access_list[512];
+    format_access_list(file_info, access_list, sizeof(access_list));
+    
+
+
     
     // 3. Build response in the format client expects
     char response[MAX_BUFFER_SIZE];
@@ -337,13 +395,13 @@ void handle_info_command(int client_fd, const char* file_path) {
              "--> Created: %s\n"
              "--> Last Modified: %s\n"
              "--> Size: N/A\n"
-             "--> Access: %s (RW)\n"
+             "--> Access: %s\n"
              "--> Last Accessed: %s by %s",
              file_path,
              file_info->owner ? file_info->owner : "unknown",
              created_str,
              created_str,  // Using created time as modified time (no separate field yet)
-             file_info->owner ? file_info->owner : "unknown",
+             access_list,
              accessed_str,
              file_info->owner ? file_info->owner : "unknown");
     
@@ -399,4 +457,100 @@ void handle_list_command(int client_fd) {
     send_message(client_fd, response);
     
     printf("[NS-Client][LIST] ✓ Sent %d users to client\n", count);
+}
+
+
+/**
+ * Handle ADDACCESS command
+ */
+void handle_addaccess_command(int client_fd, const char* file_path, 
+                              const char* username, char access_type, 
+                              const char* requester) {
+    printf("[NS-Client][ADDACCESS] %s requesting %c access for %s on '%s'\n",
+           requester, access_type, username, file_path);
+    
+    // 1. Check if file exists
+    FileInfo* file = find_file(file_path);
+    if (!file) {
+        send_message(client_fd, "ERROR: File not found");
+        return;
+    }
+    
+    // 2. Check if requester is the owner
+    if (!is_file_owner(file_path, requester)) {
+        send_message(client_fd, "ERROR: Only file owner can modify access");
+        return;
+    }
+    
+    // 3. Validate access type
+    if (access_type != 'R' && access_type != 'W') {
+        send_message(client_fd, "ERROR: Invalid access type. Use R or W");
+        return;
+    }
+    
+    // 4. Check if user exists
+    if (!user_exists(username)) {
+        send_message(client_fd, "ERROR: User does not exist");
+        return;
+    }
+    
+    // 5. Add access
+    int result;
+    if (access_type == 'R') {
+        result = add_read_access(file_path, username);
+    } else {
+        result = add_write_access(file_path, username);
+    }
+    
+    if (result == 0) {
+        char response[256];
+        snprintf(response, sizeof(response), 
+                "SUCCESS: %s access granted to %s for '%s'",
+                access_type == 'R' ? "Read" : "Write", username, file_path);
+        send_message(client_fd, response);
+        printf("[NS-Client][ADDACCESS] ✓ Access granted\n");
+    } else {
+        send_message(client_fd, "ERROR: Failed to add access");
+    }
+}
+
+/**
+ * Handle REMACCESS command
+ */
+void handle_remaccess_command(int client_fd, const char* file_path, 
+                              const char* username, const char* requester) {
+    printf("[NS-Client][REMACCESS] %s removing access for %s on '%s'\n",
+           requester, username, file_path);
+    
+    // 1. Check if file exists
+    FileInfo* file = find_file(file_path);
+    if (!file) {
+        send_message(client_fd, "ERROR: File not found");
+        return;
+    }
+    
+    // 2. Check if requester is the owner
+    if (!is_file_owner(file_path, requester)) {
+        send_message(client_fd, "ERROR: Only file owner can modify access");
+        return;
+    }
+    
+    // 3. Cannot remove owner's access
+    if (strcmp(username, requester) == 0) {
+        send_message(client_fd, "ERROR: Cannot remove owner's access");
+        return;
+    }
+    
+    // 4. Remove access
+    int result = remove_access(file_path, username);
+    
+    if (result == 0) {
+        char response[256];
+        snprintf(response, sizeof(response), 
+                "SUCCESS: Access removed for %s from '%s'", username, file_path);
+        send_message(client_fd, response);
+        printf("[NS-Client][REMACCESS] ✓ Access removed\n");
+    } else {
+        send_message(client_fd, "ERROR: User had no access to remove");
+    }
 }

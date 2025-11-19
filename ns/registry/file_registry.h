@@ -20,6 +20,15 @@ typedef struct FileInfo {
     time_t last_accessed;           // Last access time
     char* owner;                    // Owner ID
     bool is_active;                 // Is file still available?
+
+    char** read_users;              // Array of usernames with read-only access
+    int read_count;
+    int read_capacity;
+
+    char** write_users;             // Array of usernames with read+write access
+    int write_count;
+    int write_capacity;
+
 } FileInfo;
 
 /**
@@ -93,5 +102,65 @@ void mark_file_inactive(const char* file_path);
  * Cleanup registry and free all resources
  */
 void cleanup_file_registry();
+
+
+
+/**
+ * Add read access for a user
+ * @param file_path File path
+ * @param username Username to grant access
+ * @return 0 on success, -1 on error
+ */
+int add_read_access(const char* file_path, const char* username);
+
+/**
+ * Add write access for a user (includes read)
+ * @param file_path File path
+ * @param username Username to grant access
+ * @return 0 on success, -1 on error
+ */
+int add_write_access(const char* file_path, const char* username);
+
+/**
+ * Remove all access for a user
+ * @param file_path File path
+ * @param username Username to revoke access from
+ * @return 0 on success, -1 on error
+ */
+int remove_access(const char* file_path, const char* username);
+
+/**
+ * Check if user has read access to file
+ * @param file_path File path
+ * @param username Username to check
+ * @return true if user has read access (owner, read_users, or write_users)
+ */
+bool has_read_access(const char* file_path, const char* username);
+
+/**
+ * Check if user has write access to file
+ * @param file_path File path
+ * @param username Username to check
+ * @return true if user has write access (owner or write_users)
+ */
+bool has_write_access(const char* file_path, const char* username);
+
+/**
+ * Check if user is the owner of file
+ * @param file_path File path
+ * @param username Username to check
+ * @return true if user is the owner
+ */
+bool is_file_owner(const char* file_path, const char* username);
+
+/**
+ * Get formatted access list for INFO command
+ * @param file_info File info structure
+ * @param buffer Buffer to store formatted string
+ * @param buffer_size Size of buffer
+ * @return Length of formatted string
+ */
+int format_access_list(FileInfo* file_info, char* buffer, size_t buffer_size);
+
 
 #endif // FILE_REGISTRY_H

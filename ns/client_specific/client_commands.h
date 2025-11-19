@@ -71,5 +71,26 @@ void handle_info_command(int client_fd, const char* file_path);
  */
 void handle_list_command(int client_fd);
 
+/**
+ * Handle ADDACCESS command
+ * @param client_fd Client socket
+ * @param file_path File path
+ * @param username User to grant access
+ * @param access_type 'R' for read, 'W' for write
+ * @param requester Username of person making request
+ */
+void handle_addaccess_command(int client_fd, const char* file_path, 
+                              const char* username, char access_type, 
+                              const char* requester);
 
+/**
+ * Handle REMACCESS command
+ * @param client_fd Client socket
+ * @param file_path File path
+ * @param username User to revoke access from
+ * @param requester Username of person making request
+ */
+void handle_remaccess_command(int client_fd, const char* file_path, 
+                              const char* username, const char* requester);
+                              
 #endif // CLIENT_COMMANDS_H

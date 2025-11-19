@@ -102,4 +102,7 @@
 
 
 #define MAX_USERNAME_LENGTH 64
+
+#define MAX_ACCESS_USERS 50  // Max users with access to a file
+
 #endif // PROJECT_CONSTANTS_H

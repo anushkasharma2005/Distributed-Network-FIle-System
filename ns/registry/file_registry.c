@@ -79,7 +79,27 @@ int register_file(const char* file_path, int ss_id, const char* ss_ip, int ss_cl
     new_node->value->ss_nm_port = ss_nm_port;
     new_node->value->owner = strdup(owner);
 
+    new_node->value->read_users = calloc(MAX_ACCESS_USERS, sizeof(char*));
+    new_node->value->write_users = calloc(MAX_ACCESS_USERS, sizeof(char*));
+    
+    if (!new_node->value->read_users || !new_node->value->write_users) {
+        free(new_node->value->read_users);
+        free(new_node->value->write_users);
+        free(new_node->value->owner);
+        free(new_node->value);
+        free(new_node->key);
+        free(new_node);
+        pthread_mutex_unlock(&file_registry.mutex);
+        return -1;
+    }
+    
+    new_node->value->read_count = 0;
+    new_node->value->read_capacity = MAX_ACCESS_USERS;
+    new_node->value->write_count = 0;
+    new_node->value->write_capacity = MAX_ACCESS_USERS;
+    
 
+    
     // Insert at head
     new_node->next = file_registry.buckets[index];
     file_registry.buckets[index] = new_node;
@@ -141,9 +161,21 @@ int unregister_file(const char* file_path) {
             }
             
             // Free memory
+            for (int i = 0; i < current->value->read_count; i++) {
+                free(current->value->read_users[i]);
+            }
+            free(current->value->read_users);
+            
+            for (int i = 0; i < current->value->write_count; i++) {
+                free(current->value->write_users[i]);
+            }
+            free(current->value->write_users);
+            
             free(current->key);
+            free(current->value->owner);
             free(current->value);
             free(current);
+    
             
             file_registry.count--;
             
@@ -207,7 +239,19 @@ void cleanup_file_registry() {
         while (current != NULL) {
             FileHashNode* temp = current;
             current = current->next;
+
+            for (int j = 0; j < temp->value->read_count; j++) {
+                free(temp->value->read_users[j]);
+            }
+            free(temp->value->read_users);
+            
+            for (int j = 0; j < temp->value->write_count; j++) {
+                free(temp->value->write_users[j]);
+            }
+            free(temp->value->write_users);
+            
             free(temp->key);
+            free(temp->value->owner);
             free(temp->value);
             free(temp);
         }
@@ -220,4 +264,299 @@ void cleanup_file_registry() {
     pthread_mutex_destroy(&file_registry.mutex);
     
     printf("[File-Registry] Cleanup complete\n");
+}
+
+
+
+/**
+ * Add read access for a user
+ */
+int add_read_access(const char* file_path, const char* username) {
+    if (!file_path || !username) return -1;
+    
+    FileInfo* file = find_file(file_path);
+    if (!file) {
+        fprintf(stderr, "[File-Registry] File not found: %s\n", file_path);
+        return -1;
+    }
+    
+    pthread_mutex_lock(&file_registry.mutex);
+    
+    // Check if user is owner
+    if (strcmp(file->owner, username) == 0) {
+        pthread_mutex_unlock(&file_registry.mutex);
+        printf("[File-Registry] User '%s' is already owner of '%s'\n", username, file_path);
+        return 0;
+    }
+    
+    // Check if already in write_users (write includes read)
+    for (int i = 0; i < file->write_count; i++) {
+        if (strcmp(file->write_users[i], username) == 0) {
+            pthread_mutex_unlock(&file_registry.mutex);
+            printf("[File-Registry] User '%s' already has write access to '%s'\n", username, file_path);
+            return 0;
+        }
+    }
+    
+    // Check if already in read_users
+    for (int i = 0; i < file->read_count; i++) {
+        if (strcmp(file->read_users[i], username) == 0) {
+            pthread_mutex_unlock(&file_registry.mutex);
+            printf("[File-Registry] User '%s' already has read access to '%s'\n", username, file_path);
+            return 0;
+        }
+    }
+    
+    // Add to read_users
+    if (file->read_count >= file->read_capacity) {
+        pthread_mutex_unlock(&file_registry.mutex);
+        fprintf(stderr, "[File-Registry] Max read users reached for '%s'\n", file_path);
+        return -1;
+    }
+    
+    file->read_users[file->read_count] = strdup(username);
+    if (!file->read_users[file->read_count]) {
+        pthread_mutex_unlock(&file_registry.mutex);
+        return -1;
+    }
+    
+    file->read_count++;
+    
+    pthread_mutex_unlock(&file_registry.mutex);
+    
+    printf("[File-Registry] ✓ Added read access for '%s' to '%s'\n", username, file_path);
+    return 0;
+}
+
+/**
+ * Add write access for a user (includes read)
+ */
+int add_write_access(const char* file_path, const char* username) {
+    if (!file_path || !username) return -1;
+    
+    FileInfo* file = find_file(file_path);
+    if (!file) {
+        fprintf(stderr, "[File-Registry] File not found: %s\n", file_path);
+        return -1;
+    }
+    
+    pthread_mutex_lock(&file_registry.mutex);
+    
+    // Check if user is owner
+    if (strcmp(file->owner, username) == 0) {
+        pthread_mutex_unlock(&file_registry.mutex);
+        printf("[File-Registry] User '%s' is already owner of '%s'\n", username, file_path);
+        return 0;
+    }
+    
+    // Check if already in write_users
+    for (int i = 0; i < file->write_count; i++) {
+        if (strcmp(file->write_users[i], username) == 0) {
+            pthread_mutex_unlock(&file_registry.mutex);
+            printf("[File-Registry] User '%s' already has write access to '%s'\n", username, file_path);
+            return 0;
+        }
+    }
+    
+    // Remove from read_users if present (upgrading to write)
+    for (int i = 0; i < file->read_count; i++) {
+        if (strcmp(file->read_users[i], username) == 0) {
+            free(file->read_users[i]);
+            // Shift remaining elements
+            for (int j = i; j < file->read_count - 1; j++) {
+                file->read_users[j] = file->read_users[j + 1];
+            }
+            file->read_count--;
+            printf("[File-Registry] Upgraded '%s' from read to write access\n", username);
+            break;
+        }
+    }
+    
+    // Add to write_users
+    if (file->write_count >= file->write_capacity) {
+        pthread_mutex_unlock(&file_registry.mutex);
+        fprintf(stderr, "[File-Registry] Max write users reached for '%s'\n", file_path);
+        return -1;
+    }
+    
+    file->write_users[file->write_count] = strdup(username);
+    if (!file->write_users[file->write_count]) {
+        pthread_mutex_unlock(&file_registry.mutex);
+        return -1;
+    }
+    
+    file->write_count++;
+    
+    pthread_mutex_unlock(&file_registry.mutex);
+    
+    printf("[File-Registry] ✓ Added write access for '%s' to '%s'\n", username, file_path);
+    return 0;
+}
+
+/**
+ * Remove all access for a user
+ */
+int remove_access(const char* file_path, const char* username) {
+    if (!file_path || !username) return -1;
+    
+    FileInfo* file = find_file(file_path);
+    if (!file) {
+        fprintf(stderr, "[File-Registry] File not found: %s\n", file_path);
+        return -1;
+    }
+    
+    pthread_mutex_lock(&file_registry.mutex);
+    
+    // Cannot remove owner's access
+    if (strcmp(file->owner, username) == 0) {
+        pthread_mutex_unlock(&file_registry.mutex);
+        fprintf(stderr, "[File-Registry] Cannot remove owner's access\n");
+        return -1;
+    }
+    
+    bool found = false;
+    
+    // Remove from read_users
+    for (int i = 0; i < file->read_count; i++) {
+        if (strcmp(file->read_users[i], username) == 0) {
+            free(file->read_users[i]);
+            // Shift remaining elements
+            for (int j = i; j < file->read_count - 1; j++) {
+                file->read_users[j] = file->read_users[j + 1];
+            }
+            file->read_count--;
+            found = true;
+            break;
+        }
+    }
+    
+    // Remove from write_users
+    for (int i = 0; i < file->write_count; i++) {
+        if (strcmp(file->write_users[i], username) == 0) {
+            free(file->write_users[i]);
+            // Shift remaining elements
+            for (int j = i; j < file->write_count - 1; j++) {
+                file->write_users[j] = file->write_users[j + 1];
+            }
+            file->write_count--;
+            found = true;
+            break;
+        }
+    }
+    
+    pthread_mutex_unlock(&file_registry.mutex);
+    
+    if (found) {
+        printf("[File-Registry] ✓ Removed access for '%s' from '%s'\n", username, file_path);
+        return 0;
+    } else {
+        printf("[File-Registry] User '%s' had no access to '%s'\n", username, file_path);
+        return -1;
+    }
+}
+
+/**
+ * Check if user has read access to file
+ */
+bool has_read_access(const char* file_path, const char* username) {
+    if (!file_path || !username) return false;
+    
+    FileInfo* file = find_file(file_path);
+    if (!file || !file->is_active) return false;
+    
+    pthread_mutex_lock(&file_registry.mutex);
+    
+    // Owner always has access
+    if (strcmp(file->owner, username) == 0) {
+        pthread_mutex_unlock(&file_registry.mutex);
+        return true;
+    }
+    
+    // Check read_users
+    for (int i = 0; i < file->read_count; i++) {
+        if (strcmp(file->read_users[i], username) == 0) {
+            pthread_mutex_unlock(&file_registry.mutex);
+            return true;
+        }
+    }
+    
+    // Check write_users (write includes read)
+    for (int i = 0; i < file->write_count; i++) {
+        if (strcmp(file->write_users[i], username) == 0) {
+            pthread_mutex_unlock(&file_registry.mutex);
+            return true;
+        }
+    }
+    
+    pthread_mutex_unlock(&file_registry.mutex);
+    return false;
+}
+
+/**
+ * Check if user has write access to file
+ */
+bool has_write_access(const char* file_path, const char* username) {
+    if (!file_path || !username) return false;
+    
+    FileInfo* file = find_file(file_path);
+    if (!file || !file->is_active) return false;
+    
+    pthread_mutex_lock(&file_registry.mutex);
+    
+    // Owner always has write access
+    if (strcmp(file->owner, username) == 0) {
+        pthread_mutex_unlock(&file_registry.mutex);
+        return true;
+    }
+    
+    // Check write_users
+    for (int i = 0; i < file->write_count; i++) {
+        if (strcmp(file->write_users[i], username) == 0) {
+            pthread_mutex_unlock(&file_registry.mutex);
+            return true;
+        }
+    }
+    
+    pthread_mutex_unlock(&file_registry.mutex);
+    return false;
+}
+
+/**
+ * Check if user is the owner of file
+ */
+bool is_file_owner(const char* file_path, const char* username) {
+    if (!file_path || !username) return false;
+    
+    FileInfo* file = find_file(file_path);
+    if (!file) return false;
+    
+    pthread_mutex_lock(&file_registry.mutex);
+    bool is_owner = (strcmp(file->owner, username) == 0);
+    pthread_mutex_unlock(&file_registry.mutex);
+    
+    return is_owner;
+}
+
+/**
+ * Get formatted access list for INFO command
+ */
+int format_access_list(FileInfo* file_info, char* buffer, size_t buffer_size) {
+    if (!file_info || !buffer || buffer_size == 0) return 0;
+    
+    int offset = 0;
+    
+    // Add owner
+    offset += snprintf(buffer + offset, buffer_size - offset, "%s (RW)", file_info->owner);
+    
+    // Add write users
+    for (int i = 0; i < file_info->write_count && offset < (int)buffer_size - 20; i++) {
+        offset += snprintf(buffer + offset, buffer_size - offset, ", %s (RW)", file_info->write_users[i]);
+    }
+    
+    // Add read users
+    for (int i = 0; i < file_info->read_count && offset < (int)buffer_size - 20; i++) {
+        offset += snprintf(buffer + offset, buffer_size - offset, ", %s (R)", file_info->read_users[i]);
+    }
+    
+    return offset;
 }
