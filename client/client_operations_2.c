@@ -108,10 +108,13 @@ int cmd_read(Client *client, const char *filename) {
     // Receive SS info (IP and port)
     char response[MAX_BUFFER_SIZE];
     int bytes = recv_from_nm(client, response, sizeof(response) - 1);
+    // printf(" ============= received from nm: %d\n", bytes);
     if (bytes <= 0) {
         return ERR_CONNECTION;
     }
     response[bytes] = '\0';
+
+
 
     // Check for errors
     if (strncmp(response, "ERROR", 5) == 0) {
@@ -126,6 +129,7 @@ int cmd_read(Client *client, const char *filename) {
         fprintf(stderr, "Invalid response from Name Server\n");
         return ERR_SERVER_ERROR;
     }
+    // printf("=============== resp from nm %s\n", response);
 
     // Connect to Storage Server
     if (client_connect_to_ss(client, ss_ip, ss_port) != SUCCESS) {

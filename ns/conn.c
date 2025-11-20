@@ -4,6 +4,7 @@
 #include "registry/ss_registry.h"
 #include "registry/file_registry.h"
 #include "registry/user_registry.h"
+#include "registry/cache.h" 
 #include "../api_c_ns/naming_server.h"
 #include "../api_c_ns/networking.h"
 #include "../include/constants.h"
@@ -54,10 +55,12 @@ ServerFDs setup_server(){
     init_ss_registry();
     init_file_registry();
     init_user_registry();
-
+    init_cache();
 
     printf("[NS] Storage Server registry initialized\n");
     printf("[NS] File registry initialized\n\n");
+    printf("[NS] User registry initialized\n");
+    printf("[NS] Cache initialized\n");
 
     printf("\n╔════════════════════════════════════════╗\n");
     printf("║   NAMING SERVER FULLY INITIALIZED      ║\n");

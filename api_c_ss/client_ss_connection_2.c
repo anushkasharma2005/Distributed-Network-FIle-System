@@ -138,11 +138,11 @@ int ss_handle_write_begin(int client_fd, ClientRequest *request, ClientManager *
         return -1;
     }
 
-    // Create snapshot before writing (for UNDO)
-    if (fs_create_snapshot(fs, request->username) != 0) {
-        fprintf(stderr, "[SS] Warning: Failed to create snapshot for %s\n", 
-                request->filename);
-    }
+    // // Create snapshot before writing (for UNDO)
+    // if (fs_create_snapshot(fs, request->username) != 0) {
+    //     fprintf(stderr, "[SS] Warning: Failed to create snapshot for %s\n", 
+    //             request->filename);
+    // }
 
     pthread_rwlock_wrlock(&fs->file_lock);
 
@@ -212,8 +212,30 @@ int ss_handle_write_begin(int client_fd, ClientRequest *request, ClientManager *
     // Copy main file to temp file
     char main_path[MAX_FILENAME * 2];
     char temp_path[MAX_FILENAME * 2];
-    snprintf(main_path, sizeof(main_path), "%s/%s", manager->base_path, fs->filename);
-    snprintf(temp_path, sizeof(temp_path), "%s/%s", manager->base_path, fs->temp_filename);
+    // snprintf(main_path, sizeof(main_path), "%s/%s", manager->base_path, fs->filename);
+    // snprintf(temp_path, sizeof(temp_path), "%s/%s", manager->base_path, fs->temp_filename);
+    
+    if (strlen(fs->folder_path) == 0 || strcmp(fs->folder_path, "") == 0) {
+        // Shouldn't happen after fs_create fix, but handle it
+        snprintf(main_path, sizeof(main_path), "%s/root/%s", 
+                 manager->base_path, fs->filename);
+        snprintf(temp_path, sizeof(temp_path), "%s/root/%s", 
+                 manager->base_path, fs->temp_filename);
+    } else if (strcmp(fs->folder_path, "root") == 0) {
+        snprintf(main_path, sizeof(main_path), "%s/root/%s", 
+                 manager->base_path, fs->filename);
+        snprintf(temp_path, sizeof(temp_path), "%s/root/%s", 
+                 manager->base_path, fs->temp_filename);
+    } else {
+        // File in subfolder
+        snprintf(main_path, sizeof(main_path), "%s/%s/%s", 
+                 manager->base_path, fs->folder_path, fs->filename);
+        snprintf(temp_path, sizeof(temp_path), "%s/%s/%s", 
+                 manager->base_path, fs->folder_path, fs->temp_filename);
+    }
+
+    printf("[SS-WRITE] Main file path: %s\n", main_path);
+    printf("[SS-WRITE] Temp file path: %s\n", temp_path);
 
     // Copy file (or create empty if doesn't exist)
     FILE *src = fopen(main_path, "r");
@@ -255,7 +277,7 @@ int ss_handle_write_begin(int client_fd, ClientRequest *request, ClientManager *
         unlink(temp_path);
         return -1;
     }
-
+    strcpy(temp_fs->folder_path, fs->folder_path);
     fs_load_from_disk(temp_fs, manager->base_path);
 
     // Lock the sentence in temp structure
@@ -356,6 +378,192 @@ int ss_handle_write_update(int client_fd, ClientRequest *request, ClientManager 
     return 0;
 }
 
+// int ss_handle_write_end(int client_fd, ClientRequest *request, ClientManager *manager) {
+//     ClientRequest response;
+    
+//     memset(&response, 0, sizeof(ClientRequest));
+//     response.op_type = OP_ACK;
+//     strncpy(response.filename, request->filename, MAX_FILENAME - 1);
+
+//     WriteSession *session = ss_find_write_session(manager, client_fd);
+//     if (!session || !session->temp_fs) {
+//         response.status = -1;
+//         snprintf(response.error_msg, 512, "No active write session");
+//         ss_send_to_client(client_fd, &response);
+//         return -1;
+//     }
+
+//     // Get main file structure
+//     FileStructure *fs = fm_get_file(manager->file_manager, session->filename);
+//     if (!fs) {
+//         response.status = -1;
+//         snprintf(response.error_msg, 512, "File not found");
+//         ss_send_to_client(client_fd, &response);
+//         ss_destroy_write_session(manager, client_fd);
+//         return -1;
+//     }
+
+//     // CRITICAL FIX: Extract ALL modified sentences from temp file (not just one)
+    
+//     pthread_rwlock_rdlock(&session->temp_fs->file_lock);
+    
+//     // Count how many sentences exist in temp file starting from locked sentence
+//     int temp_sentence_count = 0;
+//     SentenceNode *temp_current = find_sentence(session->temp_fs, session->sentence_num);
+//     while (temp_current) {
+//         temp_sentence_count++;
+//         temp_current = temp_current->next;
+//     }
+    
+//     // Deep copy ALL sentences from locked sentence onwards
+//     SentenceNode **sentence_copies = (SentenceNode **)calloc(temp_sentence_count, sizeof(SentenceNode *));
+//     if (!sentence_copies) {
+//         pthread_rwlock_unlock(&session->temp_fs->file_lock);
+//         response.status = -1;
+//         snprintf(response.error_msg, 512, "Memory allocation failed");
+//         ss_send_to_client(client_fd, &response);
+//         ss_destroy_write_session(manager, client_fd);
+//         return -1;
+//     }
+    
+//     temp_current = find_sentence(session->temp_fs, session->sentence_num);
+//     for (int i = 0; i < temp_sentence_count && temp_current; i++) {
+//         pthread_rwlock_rdlock(&temp_current->lock);
+        
+//         SentenceNode *sentence_copy = sentence_create('\0');
+        
+//         // Copy delimiters
+//         strncpy(sentence_copy->delimiters, temp_current->delimiters, MAX_WHITESPACE - 1);
+//         sentence_copy->delimiters[MAX_WHITESPACE - 1] = '\0';
+//         strncpy(sentence_copy->whitespace_after_delimiters, 
+//                temp_current->whitespace_after_delimiters, MAX_WHITESPACE - 1);
+//         sentence_copy->whitespace_after_delimiters[MAX_WHITESPACE - 1] = '\0';
+
+//         // Copy all words
+//         WordNode *word = temp_current->words;
+//         while (word) {
+//             WordNode *new_word = word_create(word->word);
+//             if (new_word) {
+//                 strncpy(new_word->whitespace_after, word->whitespace_after, MAX_WHITESPACE - 1);
+//                 new_word->whitespace_after[MAX_WHITESPACE - 1] = '\0';
+                
+//                 // Append to sentence
+//                 if (!sentence_copy->words) {
+//                     sentence_copy->words = new_word;
+//                 } else {
+//                     WordNode *tail = sentence_copy->words;
+//                     while (tail->next) tail = tail->next;
+//                     tail->next = new_word;
+//                 }
+//                 sentence_copy->word_count++;
+//             }
+//             word = word->next;
+//         }
+        
+//         sentence_copies[i] = sentence_copy;
+        
+//         pthread_rwlock_unlock(&temp_current->lock);
+//         temp_current = temp_current->next;
+//     }
+    
+//     pthread_rwlock_unlock(&session->temp_fs->file_lock);
+
+//     // Reload main file from disk (in case it was modified by another client)
+//     pthread_rwlock_wrlock(&fs->file_lock);
+    
+//     // Destroy old in-memory structure
+//     SentenceNode *old_sentence = fs->sentences;
+//     while (old_sentence) {
+//         SentenceNode *next = old_sentence->next;
+//         sentence_destroy(old_sentence);
+//         old_sentence = next;
+//     }
+//     fs->sentences = NULL;
+//     fs->sentence_count = 0;
+    
+//     // Reload from disk
+//     pthread_rwlock_unlock(&fs->file_lock);
+//     fs_load_from_disk(fs, manager->base_path);
+//     pthread_rwlock_wrlock(&fs->file_lock);
+
+//     // Find insertion point in main file
+//     SentenceNode *target_sentence = find_sentence(fs, session->sentence_num);
+//     SentenceNode *prev_sentence = NULL;
+    
+//     if (session->sentence_num > 0) {
+//         prev_sentence = find_sentence(fs, session->sentence_num - 1);
+//     }
+    
+//     // Remove old sentences starting from locked sentence (they will be replaced)
+//     if (target_sentence) {
+//         // Find how many sentences to remove (same count as we're adding)
+//         SentenceNode *to_remove = target_sentence;
+//         for (int i = 0; i < temp_sentence_count && to_remove; i++) {
+//             SentenceNode *next = to_remove->next;
+            
+//             // Unlink and destroy
+//             if (prev_sentence) {
+//                 prev_sentence->next = next;
+//             } else {
+//                 fs->sentences = next;
+//             }
+            
+//             sentence_destroy(to_remove);
+//             fs->sentence_count--;
+            
+//             to_remove = next;
+//         }
+//     }
+    
+//     // Insert all copied sentences at the locked position
+//     for (int i = 0; i < temp_sentence_count; i++) {
+//         if (!prev_sentence) {
+//             // Insert at beginning
+//             sentence_copies[i]->next = fs->sentences;
+//             fs->sentences = sentence_copies[i];
+//             prev_sentence = sentence_copies[i];
+//         } else {
+//             // Insert after prev_sentence
+//             sentence_copies[i]->next = prev_sentence->next;
+//             prev_sentence->next = sentence_copies[i];
+//             prev_sentence = sentence_copies[i];
+//         }
+//         fs->sentence_count++;
+//     }
+    
+//     free(sentence_copies);
+    
+//     // Write merged content back to disk
+//     int write_result = fs_write_to_disk(fs, manager->base_path);
+    
+//     if (write_result != 0) {
+//         pthread_rwlock_unlock(&fs->file_lock);
+//         response.status = -1;
+//         snprintf(response.error_msg, 512, "Failed to write merged content to disk");
+//         ss_send_to_client(client_fd, &response);
+//         ss_destroy_write_session(manager, client_fd);
+//         return -1;
+//     }
+
+//     // Clear write lock
+//     fs->has_active_write = 0;
+//     fs->write_user[0] = '\0';
+//     fs->temp_filename[0] = '\0';
+//     fs->last_modified = time(NULL);
+//     pthread_rwlock_unlock(&fs->file_lock);
+
+//     response.status = 0;
+//     snprintf(response.error_msg, 512, "Write completed successfully");
+//     ss_send_to_client(client_fd, &response);
+    
+//     ss_destroy_write_session(manager, client_fd);
+
+//     printf("[SS] WRITE_END: Committed write for file %s (%d sentences merged starting from sentence %d)\n", 
+//            session->filename, temp_sentence_count, session->sentence_num);
+//     return 0;
+// }
+
+
 int ss_handle_write_end(int client_fd, ClientRequest *request, ClientManager *manager) {
     ClientRequest response;
     
@@ -381,8 +589,35 @@ int ss_handle_write_end(int client_fd, ClientRequest *request, ClientManager *ma
         return -1;
     }
 
-    // CRITICAL FIX: Extract ALL modified sentences from temp file (not just one)
+    // **NEW: Create snapshot BEFORE merging changes**
+    // This captures the state BEFORE this write operation
     
+    // First, reload main file from disk to get current state
+    pthread_rwlock_wrlock(&fs->file_lock);
+    
+    // Destroy old in-memory structure
+    SentenceNode *old_sentence = fs->sentences;
+    while (old_sentence) {
+        SentenceNode *next = old_sentence->next;
+        sentence_destroy(old_sentence);
+        old_sentence = next;
+    }
+    fs->sentences = NULL;
+    fs->sentence_count = 0;
+    
+    // Reload from disk
+    pthread_rwlock_unlock(&fs->file_lock);
+    fs_load_from_disk(fs, manager->base_path);
+    
+    // **CREATE SNAPSHOT NOW (before merge)**
+    printf("[SS] Creating snapshot before applying write by %s\n", session->username);
+    if (fs_create_snapshot(fs, session->username) != 0) {
+        fprintf(stderr, "[SS] Warning: Failed to create snapshot for %s\n", 
+                session->filename);
+        // Don't fail the write, but warn
+    }
+    
+    // Extract ALL modified sentences from temp file
     pthread_rwlock_rdlock(&session->temp_fs->file_lock);
     
     // Count how many sentences exist in temp file starting from locked sentence
@@ -446,22 +681,7 @@ int ss_handle_write_end(int client_fd, ClientRequest *request, ClientManager *ma
     
     pthread_rwlock_unlock(&session->temp_fs->file_lock);
 
-    // Reload main file from disk (in case it was modified by another client)
-    pthread_rwlock_wrlock(&fs->file_lock);
-    
-    // Destroy old in-memory structure
-    SentenceNode *old_sentence = fs->sentences;
-    while (old_sentence) {
-        SentenceNode *next = old_sentence->next;
-        sentence_destroy(old_sentence);
-        old_sentence = next;
-    }
-    fs->sentences = NULL;
-    fs->sentence_count = 0;
-    
-    // Reload from disk
-    pthread_rwlock_unlock(&fs->file_lock);
-    fs_load_from_disk(fs, manager->base_path);
+    // Now merge changes into main file (which was already reloaded above)
     pthread_rwlock_wrlock(&fs->file_lock);
 
     // Find insertion point in main file
@@ -472,41 +692,61 @@ int ss_handle_write_end(int client_fd, ClientRequest *request, ClientManager *ma
         prev_sentence = find_sentence(fs, session->sentence_num - 1);
     }
     
-    // Remove old sentences starting from locked sentence (they will be replaced)
+    // Save sentences AFTER the locked sentence (we'll only remove what we're replacing)
+    SentenceNode *sentences_after_target = NULL;
+    
     if (target_sentence) {
-        // Find how many sentences to remove (same count as we're adding)
-        SentenceNode *to_remove = target_sentence;
-        for (int i = 0; i < temp_sentence_count && to_remove; i++) {
-            SentenceNode *next = to_remove->next;
-            
-            // Unlink and destroy
-            if (prev_sentence) {
-                prev_sentence->next = next;
-            } else {
-                fs->sentences = next;
-            }
-            
-            sentence_destroy(to_remove);
-            fs->sentence_count--;
-            
-            to_remove = next;
+        sentences_after_target = target_sentence->next;
+        
+        // Unlink and destroy ONLY the locked sentence
+        if (prev_sentence) {
+            prev_sentence->next = NULL;
+        } else {
+            fs->sentences = NULL;
         }
+        
+        target_sentence->next = NULL;
+        sentence_destroy(target_sentence);
+        fs->sentence_count--;
     }
     
+    // Now remove additional sentences if we're replacing multiple
+    SentenceNode *to_remove = sentences_after_target;
+    for (int i = 1; i < temp_sentence_count && to_remove; i++) {
+        SentenceNode *next_after_removal = to_remove->next;
+        sentence_destroy(to_remove);
+        fs->sentence_count--;
+        to_remove = next_after_removal;
+    }
+    sentences_after_target = to_remove; // Update to point to sentences we're keeping
+    
     // Insert all copied sentences at the locked position
+    SentenceNode *insert_point = prev_sentence;
+    
     for (int i = 0; i < temp_sentence_count; i++) {
-        if (!prev_sentence) {
+        if (!insert_point) {
             // Insert at beginning
             sentence_copies[i]->next = fs->sentences;
             fs->sentences = sentence_copies[i];
-            prev_sentence = sentence_copies[i];
+            insert_point = sentence_copies[i];
         } else {
-            // Insert after prev_sentence
-            sentence_copies[i]->next = prev_sentence->next;
-            prev_sentence->next = sentence_copies[i];
-            prev_sentence = sentence_copies[i];
+            // Insert after insert_point
+            sentence_copies[i]->next = insert_point->next;
+            insert_point->next = sentence_copies[i];
+            insert_point = sentence_copies[i];
         }
         fs->sentence_count++;
+    }
+    
+    // Reconnect sentences after
+    if (insert_point) {
+        insert_point->next = sentences_after_target;
+    } else if (fs->sentences) {
+        SentenceNode *tail = fs->sentences;
+        while (tail->next) tail = tail->next;
+        tail->next = sentences_after_target;
+    } else {
+        fs->sentences = sentences_after_target;
     }
     
     free(sentence_copies);
@@ -521,6 +761,25 @@ int ss_handle_write_end(int client_fd, ClientRequest *request, ClientManager *ma
         ss_send_to_client(client_fd, &response);
         ss_destroy_write_session(manager, client_fd);
         return -1;
+    }
+
+    char temp_path[MAX_FILENAME * 2];
+    
+    if (strlen(fs->folder_path) == 0 || strcmp(fs->folder_path, "") == 0) {
+        snprintf(temp_path, sizeof(temp_path), "%s/root/%s", 
+                 manager->base_path, fs->temp_filename);
+    } else if (strcmp(fs->folder_path, "root") == 0) {
+        snprintf(temp_path, sizeof(temp_path), "%s/root/%s", 
+                 manager->base_path, fs->temp_filename);
+    } else {
+        snprintf(temp_path, sizeof(temp_path), "%s/%s/%s", 
+                 manager->base_path, fs->folder_path, fs->temp_filename);
+    }
+
+    printf("[SS-WRITE] Deleting temp file: %s\n", temp_path);
+    if (unlink(temp_path) != 0) {
+        fprintf(stderr, "[SS-WRITE] Warning: Failed to delete temp file %s: %s\n", 
+                temp_path, strerror(errno));
     }
 
     // Clear write lock

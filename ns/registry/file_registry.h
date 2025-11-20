@@ -16,10 +16,26 @@ typedef struct FileInfo {
     char ss_ip[16];                 // SS IP address
     int ss_client_port;             // SS client port
     int ss_nm_port;                 // SS NM port, to look up for the ss
-    time_t created_at;              // When file was created
+    time_t created_at;              // When file was created (this never chnages)
     time_t last_accessed;           // Last access time
+    time_t last_modified;           // Updates on writes
     char* owner;                    // Owner ID
     bool is_active;                 // Is file still available?
+
+    time_t deleted_at;
+
+    char** read_users;              // Array of usernames with read-only access
+    int read_count;
+    int read_capacity;
+
+    char** write_users;             // Array of usernames with read+write access
+    int write_count;
+    int write_capacity;
+
+    int word_count;      // -1 means N/A
+    int char_count;      // -1 means N/A
+    long file_size;      // -1 means N/A
+
 } FileInfo;
 
 /**
@@ -93,5 +109,113 @@ void mark_file_inactive(const char* file_path);
  * Cleanup registry and free all resources
  */
 void cleanup_file_registry();
+
+
+
+/**
+ * Add read access for a user
+ * @param file_path File path
+ * @param username Username to grant access
+ * @return 0 on success, -1 on error
+ */
+int add_read_access(const char* file_path, const char* username);
+
+/**
+ * Add write access for a user (includes read)
+ * @param file_path File path
+ * @param username Username to grant access
+ * @return 0 on success, -1 on error
+ */
+int add_write_access(const char* file_path, const char* username);
+
+/**
+ * Remove all access for a user
+ * @param file_path File path
+ * @param username Username to revoke access from
+ * @return 0 on success, -1 on error
+ */
+int remove_access(const char* file_path, const char* username);
+
+/**
+ * Check if user has read access to file
+ * @param file_path File path
+ * @param username Username to check
+ * @return true if user has read access (owner, read_users, or write_users)
+ */
+bool has_read_access(const char* file_path, const char* username);
+
+/**
+ * Check if user has write access to file
+ * @param file_path File path
+ * @param username Username to check
+ * @return true if user has write access (owner or write_users)
+ */
+bool has_write_access(const char* file_path, const char* username);
+
+/**
+ * Check if user is the owner of file
+ * @param file_path File path
+ * @param username Username to check
+ * @return true if user is the owner
+ */
+bool is_file_owner(const char* file_path, const char* username);
+
+/**
+ * Get formatted access list for INFO command
+ * @param file_info File info structure
+ * @param buffer Buffer to store formatted string
+ * @param buffer_size Size of buffer
+ * @return Length of formatted string
+ */
+int format_access_list(FileInfo* file_info, char* buffer, size_t buffer_size);
+
+
+/**
+ * Get all files user has access to
+ * @param username Username to check
+ * @param files Array to store FileInfo pointers (don't free these)
+ * @param max_size Maximum array size
+ * @param include_all If true, return all files regardless of access
+ * @return Number of files
+ */
+int get_accessible_files(const char* username, FileInfo** files, int max_size, bool include_all);
+
+/**
+ * Update file metadata from Storage Server
+ * Fetches fresh word_count, char_count, and file_size from SS
+ * @param file_path File path
+ * @return 0 on success, -1 on error
+ */
+int update_file_metadata(const char* file_path);
+
+/**
+ * Soft delete a file (mark inactive with timestamp)
+ * @param file_path File path
+ * @return 0 on success, -1 on error
+ */
+int soft_delete_file(const char* file_path);
+
+/**
+ * Restore a soft-deleted file
+ * @param file_path File path
+ * @return 0 on success, -1 on error
+ */
+int restore_file(const char* file_path);
+
+/**
+ * Check if a deleted file has expired (can be purged)
+ * @param file File info
+ * @return true if expired, false otherwise
+ */
+bool is_delete_expired(FileInfo* file);
+
+/**
+ * Permanently delete file (remove from NS + SS)
+ * @param file_path File path
+ * @return 0 on success, -1 on error
+ */
+int permanently_delete_file(const char* file_path);
+
+
 
 #endif // FILE_REGISTRY_H

@@ -3,7 +3,7 @@
 
 
 #include "../types.h"
-
+#include "../include/constants.h"
 
 
 /**
@@ -14,7 +14,7 @@ typedef struct {
     int client_fd;           // Client socket file descriptor
     Connection client_conn;  // Client connection details (IP, port)
     char username[MAX_USERNAME_LENGTH]; // Client username
-} ClientThreadData;
+} ClientThreadData_NS;
 
 /**
  * Thread function to accept incoming client connections
@@ -34,7 +34,7 @@ int setup_client_server();
  * Client handler function that runs in a separate thread
  * Handles communication with a single client, receives messages and sends acknowledgments
  * Thread automatically detaches and cleans up resources on completion
- * @param arg Pointer to ClientThreadData structure containing client information
+ * @param arg Pointer to ClientThreadData_NS structure containing client information
  * @return NULL on thread completion
  */
 void* handle_client(void* arg);

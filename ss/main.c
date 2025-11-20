@@ -22,12 +22,14 @@ void signal_handler(int sig) {
 typedef struct {
     int ns_sock;
     char base_path[256];
+    ClientManager *client_manager;
 } NSThreadArgs;
 
 // Thread for handling NS communication
 void *ns_communication_thread(void *arg) {
     NSThreadArgs *args = (NSThreadArgs *)arg;
     int ns_sock = args->ns_sock;
+    ClientManager *client_manager = args->client_manager;
     char base_path[256];
     
     strncpy(base_path, args->base_path, sizeof(base_path) - 1);
@@ -39,7 +41,7 @@ void *ns_communication_thread(void *arg) {
     printf("[SS] Starting NS communication handler with base path: %s\n", base_path);
     
     // Handle NS commands (this blocks)
-    ss_handle_ns_commands(ns_sock, base_path);
+    ss_handle_ns_commands(ns_sock, base_path, client_manager);
     
     return NULL;
 }
@@ -81,7 +83,7 @@ int main(int argc, char *argv[]) {
     int nm_port = 9002;      // Port for NM connection
     int client_port = 9003;  // Port for client connections
     char base_path[256] = "./storage";
-    char ss_ip[16] = "127.0.0.1";
+    char ss_ip[16] = "10.2.131.200";
     
     // Parse command line arguments
     if (argc >= 5) {
@@ -89,6 +91,11 @@ int main(int argc, char *argv[]) {
         ns_port = atoi(argv[2]);
         nm_port = atoi(argv[3]);
         client_port = atoi(argv[4]);
+    }
+
+    if (argc >= 6) {
+        strncpy(base_path, argv[5], sizeof(base_path) - 1);
+        base_path[sizeof(base_path) - 1] = '\0';
     }
     
     // Create unique storage directory based on IP and client port
@@ -157,30 +164,6 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    // Step 4: Start NS communication thread
-    printf("\n[SS] Step 4: Starting NS communication thread...\n");
-    pthread_t ns_thread;
-    
-    // Allocate thread arguments
-    NSThreadArgs *ns_args = (NSThreadArgs *)malloc(sizeof(NSThreadArgs));
-    if (!ns_args) {
-        fprintf(stderr, "[SS] Failed to allocate memory for NS thread arguments\n");
-        close(ns_sock);
-        return EXIT_FAILURE;
-    }
-    
-    ns_args->ns_sock = ns_sock;
-    strncpy(ns_args->base_path, base_path, sizeof(ns_args->base_path) - 1);
-    ns_args->base_path[sizeof(ns_args->base_path) - 1] = '\0';
-    
-    if (pthread_create(&ns_thread, NULL, ns_communication_thread, ns_args) != 0) {
-        fprintf(stderr, "[SS] Failed to create NS communication thread\n");
-        free(ns_args);
-        close(ns_sock);
-        return EXIT_FAILURE;
-    }
-    pthread_detach(ns_thread);
-
     // Step 5: Initialize client listener
     printf("\n[SS] Step 5: Initializing client listener...\n");
     int client_listen_fd = ss_init_client_listener(client_port);
@@ -199,6 +182,31 @@ int main(int argc, char *argv[]) {
         close(ns_sock);
         return EXIT_FAILURE;
     }
+
+    // Step 4: Start NS communication thread
+    printf("\n[SS] Step 4: Starting NS communication thread...\n");
+    pthread_t ns_thread;
+    
+    // Allocate thread arguments
+    NSThreadArgs *ns_args = (NSThreadArgs *)malloc(sizeof(NSThreadArgs));
+    if (!ns_args) {
+        fprintf(stderr, "[SS] Failed to allocate memory for NS thread arguments\n");
+        close(ns_sock);
+        return EXIT_FAILURE;
+    }
+    
+    ns_args->ns_sock = ns_sock;
+    ns_args->client_manager = &client_manager;
+    strncpy(ns_args->base_path, base_path, sizeof(ns_args->base_path) - 1);
+    ns_args->base_path[sizeof(ns_args->base_path) - 1] = '\0';
+    
+    if (pthread_create(&ns_thread, NULL, ns_communication_thread, ns_args) != 0) {
+        fprintf(stderr, "[SS] Failed to create NS communication thread\n");
+        free(ns_args);
+        close(ns_sock);
+        return EXIT_FAILURE;
+    }
+    pthread_detach(ns_thread);
 
     printf("\n==============================================\n");
     printf("  Storage Server is ready and running!\n");

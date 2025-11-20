@@ -305,3 +305,36 @@ void cleanup_ss_registry() {
     
     printf("[SS-Registry] Cleanup complete\n");
 }
+
+/**
+ * Get all active storage servers
+ * Returns: Number of active servers found
+ */
+int get_all_active_storage_servers(StorageServerInfo** ss_list, int max_count) {
+    if (!ss_list || max_count <= 0) {
+        return 0;
+    }
+    
+    pthread_mutex_lock(&ss_registry.mutex);
+    
+    int count = 0;
+    
+    // Iterate through all hash table buckets
+    for (int i = 0; i < HASH_TABLE_SIZE && count < max_count; i++) {
+        SSHashNode* current = ss_registry.buckets[i];
+        
+        // Traverse the chain at this bucket
+        while (current != NULL && count < max_count) {
+            if (current->value->is_active) {
+                ss_list[count] = current->value;
+                count++;
+            }
+            current = current->next;
+        }
+    }
+    
+    pthread_mutex_unlock(&ss_registry.mutex);
+    
+    printf("[SS-Registry] Found %d active storage servers\n", count);
+    return count;
+}

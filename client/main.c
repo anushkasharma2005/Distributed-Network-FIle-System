@@ -115,6 +115,32 @@ int main(int argc, char *argv[])
         case MSG_EXEC:
             result = cmd_exec(&client, cmd.filename);
             break;
+
+        case MSG_CHECKPOINT:
+            result = cmd_checkpoint(&client, cmd.filename, cmd.content);
+            break;
+        case MSG_VIEWCHECKPOINT:
+            result = cmd_viewcheckpoint(&client, cmd.filename, cmd.content);
+            break;
+        case MSG_REVERT:
+            result = cmd_revert(&client, cmd.filename, cmd.content);
+            break;
+        case MSG_RESTORE:
+            result = cmd_restore(&client, cmd.filename);
+            break;
+        case MSG_LISTCHECKPOINTS:
+            result = cmd_listcheckpoints(&client, cmd.filename);
+            break;
+        case MSG_CREATEFOLDER:
+            result = cmd_createfolder(&client, cmd.filename);
+            break;
+        case MSG_MOVE:
+            result = cmd_move(&client, cmd.filename, cmd.content);
+            break;
+        case MSG_VIEWFOLDER:
+            result = cmd_viewfolder(&client, cmd.filename);
+            break;
+
         default:
             fprintf(stderr, "Unknown command type\n");
         }
@@ -144,11 +170,20 @@ void print_help()
     printf("  DELETE <filename>       - Delete a file\n");
     printf("  STREAM <filename>       - Stream file contents word-by-word\n");
     printf("  EXEC <filename>         - Execute file contents as shell commands\n\n");
+    printf("Folder Operations:\n");
+    printf("  CREATEFOLDER <path>     - Create folder hierarchy (e.g., root/docs/work)\n");
+    printf("  MOVE <file> <folder>    - Move file to folder\n");
+    printf("  VIEWFOLDER <path>       - List folder contents\n\n");
     printf("User & Access Control:\n");
     printf("  LIST                    - List all users in system\n");
     printf("  ADDACCESS -R <file> <user> - Grant read access\n");
     printf("  ADDACCESS -W <file> <user> - Grant write access\n");
     printf("  REMACCESS <file> <user>    - Remove all access\n\n");
+    printf("Checkpoint Operations:\n");
+    printf("  CHECKPOINT <file> <tag>       - Create a checkpoint with given tag\n");
+    printf("  VIEWCHECKPOINT <file> <tag>   - View checkpoint content\n");
+    printf("  REVERT <file> <tag>           - Revert file to checkpoint\n");
+    printf("  LISTCHECKPOINTS <file>        - List all checkpoints for file\n\n");
     printf("Other:\n");
     printf("  help                    - Show this help message\n");
     printf("  exit                    - Exit the client\n\n");

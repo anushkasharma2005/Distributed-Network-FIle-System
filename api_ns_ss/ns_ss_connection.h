@@ -3,6 +3,21 @@
 
 #include <netinet/in.h>
 #include "../include/constants.h"
+#include "../api_c_ns/networking.h"
+#include "ns_ss_connection.h"
+#include "../api_c_ss/client_ss_connection.h"  // ADD THIS - for ClientManager definition
+#include "../ss/file_structure.h"              // ADD THIS - for folder functions
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <dirent.h>
+#include <errno.h>
+#include <sys/stat.h>
+#include <signal.h>
+#include <arpa/inet.h>
 
 
 // Message types for NS-SS communication
@@ -14,7 +29,14 @@ typedef enum
     MSG_DELETE_FILE,
     MSG_FILE_OP_ACK,
     MSG_HEARTBEAT,
-    MSG_ERROR
+    MSG_ERROR,
+    MSG_CREATE_FOLDER = 17,
+    MSG_MOVE_FILE = 18,
+    MSG_VIEW_FOLDER = 19,
+    MSG_READ_FILE,
+    MSG_COPY_FILE,
+    MSG_INFO_FILE,
+    MSG_GET_METADATA = 23,
 } MessageType;
 
 // Structure for file information
@@ -42,6 +64,9 @@ typedef struct
     int data_len;
     char data[MAX_BUFFER_SIZE];
 } ProtocolMessage;
+
+
+typedef struct ClientManager ClientManager;
 
 // Function prototypes for NS-SS API
 
@@ -81,9 +106,10 @@ int ss_receive_message(int sock_fd, ProtocolMessage *msg);
  * Handle incoming commands from Name Server
  * @param sock_fd Socket file descriptor
  * @param base_path Base storage path for files
+ * @param client_manager Pointer to client manager for file operations
  * @return 0 on success, -1 on error
  */
-int ss_handle_ns_commands(int sock_fd, const char *base_path);
+int ss_handle_ns_commands(int sock_fd, const char *base_path, ClientManager *client_manager);
 
 /**
  * Send heartbeat to Name Server
@@ -99,5 +125,17 @@ int ss_send_heartbeat(int sock_fd);
  * @return Number of files found, or -1 on error
  */
 int ss_scan_files(const char *base_path, SSRegistrationData *reg_data);
+
+/**
+ * Send binary protocol message
+ */
+bool send_protocol_message(int fd, const ProtocolMessage* msg);
+
+/**
+ * Receive binary protocol message
+ */
+bool recv_protocol_message(int fd, ProtocolMessage* msg);
+
+// extern volatile sig_atomic_t ns_connection_lost;
 
 #endif // NS_SS_CONNECTION_H

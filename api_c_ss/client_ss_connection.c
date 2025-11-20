@@ -250,26 +250,46 @@ int ss_handle_undo(int client_fd, ClientRequest *request, ClientManager *manager
         return -1;
     }
 
+    // **CHECK: Does snapshot exist?**
+    pthread_rwlock_rdlock(&fs->file_lock);
+    int has_snapshot = (fs->last_snapshot != NULL);
+    char modified_by[64] = {0};
+    if (has_snapshot) {
+        strncpy(modified_by, fs->last_snapshot->modified_by, 63);
+    }
+    pthread_rwlock_unlock(&fs->file_lock);
+
+    if (!has_snapshot) {
+        response.status = -1;
+        snprintf(response.error_msg, 512, 
+                "ERROR: No changes to undo. File has not been modified since last undo or server start.");
+        ss_send_to_client(client_fd, &response);
+        return -1;
+    }
+
     // Perform undo
     int result = fs_undo(fs, manager->base_path);
     
     if (result != 0) {
         response.status = -1;
-        snprintf(response.error_msg, 512, "Undo failed - no snapshot available");
+        snprintf(response.error_msg, 512, "ERROR: Undo operation failed");
     } else {
         response.status = 0;
-        snprintf(response.error_msg, 512, "Undo successful");
+        snprintf(response.error_msg, 512, 
+                "SUCCESS: Undone changes made by '%s'. File reverted to previous state.",
+                modified_by);
     }
 
     ss_send_to_client(client_fd, &response);
-    printf("[SS] UNDO completed for file: %s\n", request->filename);
+    printf("[SS] UNDO completed for file: %s (by %s, reverted %s's changes)\n", 
+           request->filename, request->username, modified_by);
     return 0;
 }
 
 // ==================== Client Handler Thread ====================
 
 void *ss_client_handler(void *arg) {
-    ClientThreadData *thread_data = (ClientThreadData *)arg;
+    SSClientThreadData *thread_data = (SSClientThreadData *)arg;
     ClientRequest request;
     ClientManager *manager = thread_data->manager;
     
@@ -310,6 +330,26 @@ void *ss_client_handler(void *arg) {
             
             case OP_UNDO:
                 ss_handle_undo(thread_data->client_fd, &request, manager);
+                break;
+            
+            case OP_CHECKPOINT:
+                ss_handle_checkpoint(thread_data->client_fd, &request, manager);
+                break;
+            
+            case OP_VIEWCHECKPOINT:
+                ss_handle_viewcheckpoint(thread_data->client_fd, &request, manager);
+                break;
+            
+            case OP_REVERT:
+                ss_handle_revert(thread_data->client_fd, &request, manager);
+                break;
+            
+            case OP_LISTCHECKPOINTS:
+                ss_handle_listcheckpoints(thread_data->client_fd, &request, manager);
+                break;
+            
+            case OP_STOP:
+                keep_running = 0;
                 break;
             
             default:

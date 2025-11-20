@@ -90,7 +90,52 @@ int cmd_undo(Client *client, const char *filename) {
         return ERR_SERVER_ERROR;
     }
 
-    printf("%s\n", response);
+    // printf("%s\n", response);
+    // return SUCCESS;
+
+    // Parse SS IP and port
+    char ss_ip[16];
+    int ss_port;
+    if (sscanf(response, "SS_INFO %s %d", ss_ip, &ss_port) != 2) {
+        fprintf(stderr, "Invalid response from Name Server\n");
+        return ERR_SERVER_ERROR;
+    }
+
+    // Connect to Storage Server
+    if (client_connect_to_ss(client, ss_ip, ss_port) != SUCCESS) {
+        return ERR_CONNECTION;
+    }
+
+    // **NEW: Send UNDO request using ClientRequest structure**
+    ClientRequest req;
+    memset(&req, 0, sizeof(ClientRequest));
+    req.op_type = OP_UNDO;
+    strncpy(req.filename, filename, MAX_FILENAME - 1);
+    strncpy(req.username, client->username, 63);
+
+    if (send_request_to_ss(client, &req) != SUCCESS) {
+        client_disconnect_from_ss(client);
+        return ERR_CONNECTION;
+    }
+
+    // Receive response
+    ClientRequest resp;
+    if (recv_response_from_ss(client, &resp) != SUCCESS) {
+        client_disconnect_from_ss(client);
+        return ERR_CONNECTION;
+    }
+
+    // Check for errors
+    if (resp.status != 0) {
+        fprintf(stderr, "%s\n", resp.error_msg);
+        client_disconnect_from_ss(client);
+        return ERR_SERVER_ERROR;
+    }
+
+    // Display success message
+    printf("%s\n", resp.error_msg);
+
+    client_disconnect_from_ss(client);
     return SUCCESS;
 }
 
@@ -191,7 +236,8 @@ int cmd_exec(Client *client, const char *filename) {
         printf("%s", response);
         fflush(stdout);
     }
-
+    
+    printf("\n");
     return SUCCESS;
 }
 
@@ -262,6 +308,35 @@ int cmd_rem_access(Client *client, const char *filename, const char *username) {
 
     char request[MAX_BUFFER_SIZE];
     snprintf(request, sizeof(request), "REMACCESS %s %s", filename, username);
+
+    if (send_to_nm(client, request, strlen(request)) != SUCCESS) {
+        return ERR_CONNECTION;
+    }
+
+    char response[MAX_BUFFER_SIZE];
+    int bytes = recv_from_nm(client, response, sizeof(response) - 1);
+    if (bytes <= 0) {
+        return ERR_CONNECTION;
+    }
+    response[bytes] = '\0';
+
+    if (strncmp(response, "ERROR", 5) == 0) {
+        fprintf(stderr, "%s\n", response);
+        return ERR_SERVER_ERROR;
+    }
+
+    printf("%s\n", response);
+    return SUCCESS;
+}
+
+// RESTORE command - Restores a deleted file
+int cmd_restore(Client *client, const char *filename) {
+    if (!client || !client->connected || !filename) {
+        return ERR_INVALID_COMMAND;
+    }
+
+    char request[MAX_BUFFER_SIZE];
+    snprintf(request, sizeof(request), "RESTORE %s", filename);
 
     if (send_to_nm(client, request, strlen(request)) != SUCCESS) {
         return ERR_CONNECTION;

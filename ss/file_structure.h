@@ -3,10 +3,7 @@
 
 #include <pthread.h>
 #include <time.h>
-
-#define MAX_WORD_LENGTH 256
-#define MAX_FILENAME 256
-#define MAX_WHITESPACE 64  // Max whitespace to preserve after each word
+#include "../include/constants.h"
 
 // Word node - represents a single word in a sentence
 typedef struct WordNode {
@@ -30,6 +27,21 @@ typedef struct SentenceNode {
     struct SentenceNode *next;
 } SentenceNode;
 
+// Checkpoint node - represents a saved state of a file
+typedef struct CheckpointNode {
+    char tag[64];                    // Checkpoint identifier
+    SentenceNode *sentences;         // Saved file content
+    time_t timestamp;                // When checkpoint was created
+    struct CheckpointNode *next;     // Next checkpoint
+} CheckpointNode;
+
+// Checkpoint list - manages all checkpoints for a file
+typedef struct CheckpointList {
+    CheckpointNode *head;
+    int count;
+    pthread_mutex_t lock;           // Lock for checkpoint operations
+} CheckpointList;
+
 // File snapshot for undo
 typedef struct FileSnapshot {
     SentenceNode *sentences;
@@ -37,6 +49,17 @@ typedef struct FileSnapshot {
     char modified_by[64];
     struct FileSnapshot *next;
 } FileSnapshot;
+
+typedef struct FolderNode {
+    char folder_name[MAX_FOLDER_NAME];
+    char full_path[MAX_PATH_LENGTH];      // e.g., "root/documents/work"
+    struct FolderNode *parent;
+    struct FolderNode *children;          // First child
+    struct FolderNode *next_sibling;      // Next sibling
+    time_t created_at;
+    char owner[64];
+    pthread_rwlock_t lock;
+} FolderNode;
 
 // File structure - represents an entire file
 typedef struct FileStructure {
@@ -59,6 +82,11 @@ typedef struct FileStructure {
     pthread_rwlock_t file_lock;
     
     struct FileStructure *next;
+    CheckpointList checkpoints;
+
+    char folder_path[MAX_PATH_LENGTH];
+    FolderNode *parent_folder;
+
 } FileStructure;
 
 // File manager - manages all files with a hash table
@@ -67,6 +95,10 @@ typedef struct FileManager {
     int table_size;
     char base_path[MAX_FILENAME];
     pthread_mutex_t manager_lock;
+
+    FolderNode *root_folder;
+    pthread_mutex_t folder_lock;
+
 } FileManager;
 
 // ==================== Function Declarations ====================
@@ -116,5 +148,33 @@ int fs_commit_write(FileStructure *fs, const char *base_path);
 SentenceNode* fs_deep_copy_sentences(SentenceNode *original);
 int fs_create_snapshot(FileStructure *fs, const char *username);
 int fs_undo(FileStructure *fs, const char *base_path);
+
+// ==================== Checkpoint Operations ====================
+int checkpoint_init(CheckpointList *list);
+void checkpoint_cleanup(CheckpointList *list);
+int checkpoint_create(FileStructure *fs, const char *tag);
+CheckpointNode* checkpoint_find(CheckpointList *list, const char *tag);
+char* checkpoint_view(FileStructure *fs, const char *tag, char *buffer, size_t buffer_size);
+int checkpoint_revert(FileStructure *fs, const char *tag, const char *base_path);
+char* checkpoint_list(FileStructure *fs, char *buffer, size_t buffer_size);
+int checkpoint_save_to_disk(FileStructure *fs, const char *base_path);
+int checkpoint_load_from_disk(FileStructure *fs, const char *base_path);
+
+// ==================== Folder Operations ====================
+int fm_init_folders(FileManager *manager);
+void fm_cleanup_folders(FileManager *manager);
+FolderNode* folder_create(const char *folder_name, const char *full_path, 
+                          const char *owner, FolderNode *parent);
+void folder_destroy_recursive(FolderNode *folder);
+FolderNode* folder_find_by_path(FileManager *manager, const char *path);
+int folder_create_hierarchy(FileManager *manager, const char *path, const char *owner);
+int folder_delete(FileManager *manager, const char *path, const char *username);
+int folder_move_file(FileManager *manager, const char *filename, 
+                     const char *dest_folder_path, const char *username);
+char* folder_list_contents(FileManager *manager, const char *path, 
+                           char *buffer, size_t buffer_size, const char *username);
+int folder_create_on_disk(FileManager *manager, const char *path);
+int folder_delete_on_disk(FileManager *manager, const char *path);
+
 
 #endif // FILE_STRUCTURE_H

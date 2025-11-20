@@ -21,7 +21,7 @@ HEADERS = types.h conn.h \
 NS_SRC = main.c conn.c
 CLIENT_SRC = $(CLIENT_DIR)/handle_client_server.c $(CLIENT_DIR)/client_commands.c
 SS_SRC = $(SS_DIR)/handle_ss.c
-REGISTRY_SRC = $(REGISTRY_DIR)/ss_registry.c $(REGISTRY_DIR)/file_registry.c $(REGISTRY_DIR)/ss_selector.c $(REGISTRY_DIR)/user_registry.c
+REGISTRY_SRC = $(REGISTRY_DIR)/ss_registry.c $(REGISTRY_DIR)/file_registry.c $(REGISTRY_DIR)/ss_selector.c $(REGISTRY_DIR)/user_registry.c $(REGISTRY_DIR)/cache.c
 API_SRC = $(API_DIR)/networking.c $(API_DIR)/naming_server.c
 
 # Object files
@@ -29,7 +29,7 @@ NS_OBJ = $(NS_SRC:.c=.o)
 CLIENT_OBJ = $(CLIENT_SRC:.c=.o)
 SS_OBJ = $(SS_SRC:.c=.o)
 REGISTRY_OBJ = $(REGISTRY_SRC:.c=.o)
-API_OBJ = $(API_DIR)/networking.o $(API_DIR)/naming_server.o
+API_OBJ = $(API_DIR)/networking.o $(API_DIR)/naming_server.o $(API_DIR)/client_api.o
 
 ALL_OBJ = $(NS_OBJ) $(CLIENT_OBJ) $(SS_OBJ) $(REGISTRY_OBJ)
 

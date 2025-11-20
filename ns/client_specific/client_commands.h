@@ -71,5 +71,105 @@ void handle_info_command(int client_fd, const char* file_path);
  */
 void handle_list_command(int client_fd);
 
+/**
+ * Handle ADDACCESS command
+ * @param client_fd Client socket
+ * @param file_path File path
+ * @param username User to grant access
+ * @param access_type 'R' for read, 'W' for write
+ * @param requester Username of person making request
+ */
+void handle_addaccess_command(int client_fd, const char* file_path, 
+                              const char* username, char access_type, 
+                              const char* requester);
+
+/**
+ * Handle REMACCESS command
+ * @param client_fd Client socket
+ * @param file_path File path
+ * @param username User to revoke access from
+ * @param requester Username of person making request
+ */
+void handle_remaccess_command(int client_fd, const char* file_path, 
+                              const char* username, const char* requester);
+
+                              
+/**
+ * Handle VIEW command
+ * @param client_fd Client socket
+ * @param flags String containing flags (e.g., "-a", "-l", "-al")
+ * @param username Username of requester
+ */
+void handle_view_command(int client_fd, const char* flags, const char* username);
+
+/**
+ * Handle EXEC command
+ * @param client_fd Client socket
+ * @param file_path Path of the file to execute
+ * @param username Username of requester
+ */
+void handle_exec_command(int client_fd, const char* file_path, const char* username);
+
+/**
+ * Helper: NS connects to SS as a client and reads file content
+ * Returns malloc'd string with file content (caller must free), or NULL on error
+ */
+char* ns_read_file_from_ss(FileInfo* file_info);
+
+
+/**
+ * Parse commands from a single line by detecting known command names
+ * Input: "ls sleep 5 echo after_party"
+ * Output: ["ls", "sleep 5", "echo after_party"]
+ *
+ * @param line Input line containing multiple commands
+ * @param commands Output array of command strings (caller must free)
+ * @return Number of commands parsed
+ */
+int parse_commands_from_line(const char* line, char*** commands);
+
+
+/**
+ * Handle DELETE command - soft delete file
+ * @param client_fd Client socket file descriptor
+ * @param file_path Path of the file to delete
+ * @param username Username of requester
+ */
+void handle_delete_command(int client_fd, const char* file_path, const char* username);
+
+/**
+ * Handle RESTORE command - restore deleted file
+ * @param client_fd Client socket file descriptor
+ * @param file_path Path of the file to restore
+ * @param username Username of requester
+ */
+void handle_restore_command(int client_fd, const char* file_path, const char* username);
+
+
+/**
+ * Handle CREATEFOLDER command - create a new folder
+ * @param client_fd Client socket file descriptor
+ * @param folderpath Path of the folder to create
+ * @param username Username of requester
+ */
+void handle_createfolder_command(int client_fd, const char* folderpath, const char* username);
+
+/**
+ * Handle MOVE command - move file to folder
+ * @param client_fd Client socket file descriptor
+ * @param filename Name of the file to move
+ * @param folderpath Destination folder path
+ * @param username Username of requester
+ */
+void handle_move_command(int client_fd, const char* filename, const char* folderpath, const char* username);
+
+/**
+ * Handle VIEWFOLDER command - view folder contents
+ * @param client_fd Client socket file descriptor
+ * @param folderpath Path of the folder to view
+ * @param username Username of requester
+ */
+void handle_viewfolder_command(int client_fd, const char* folderpath, const char* username);
+
 
 #endif // CLIENT_COMMANDS_H

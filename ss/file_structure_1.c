@@ -36,6 +36,12 @@ int fm_init(FileManager *manager, const char *base_path, int table_size) {
         return -1;
     }
 
+    if (fm_init_folders(manager) != 0) {
+        pthread_mutex_destroy(&manager->manager_lock);
+        free(manager->files);
+        return -1;
+    }
+
     printf("[FM] File manager initialized with base path: %s\n", base_path);
     return 0;
 }
@@ -59,6 +65,8 @@ void fm_cleanup(FileManager *manager) {
     free(manager->files);
     pthread_mutex_unlock(&manager->manager_lock);
     pthread_mutex_destroy(&manager->manager_lock);
+
+    fm_cleanup_folders(manager);
 }
 
 FileStructure* fm_get_or_create_file(FileManager *manager, const char *filename, const char *owner) {
@@ -318,13 +326,28 @@ FileStructure* fs_create(const char *filename, const char *owner) {
         fs->owner[0] = '\0';
     }
 
+    strcpy(fs->folder_path, "root");
+    fs->parent_folder = NULL;
+
     fs->sentences = NULL;
     fs->sentence_count = 0;
     fs->last_snapshot = NULL;
     fs->last_modified = time(NULL);
     fs->next = NULL;
 
+    fs->temp_filename[0] = '\0';  // ADD THIS
+    fs->has_active_write = 0;     // ADD THIS
+    fs->write_user[0] = '\0';     // ADD THIS
+    fs->write_sentence = -1;      // ADD THIS
+
+    // Initialize checkpoint list - ADD THIS
+    if (checkpoint_init(&fs->checkpoints) != 0) {
+        free(fs);
+        return NULL;
+    }
+    
     if (pthread_rwlock_init(&fs->file_lock, NULL) != 0) {
+        checkpoint_cleanup(&fs->checkpoints); 
         free(fs);
         return NULL;
     }
@@ -356,6 +379,8 @@ void fs_destroy(FileStructure *fs) {
         free(fs->last_snapshot);
     }
 
+    checkpoint_cleanup(&fs->checkpoints);
+
     pthread_rwlock_destroy(&fs->file_lock);
     free(fs);
 }
@@ -366,11 +391,20 @@ int fs_load_from_disk(FileStructure *fs, const char *base_path) {
     }
 
     char file_path[MAX_FILENAME * 2];
-    snprintf(file_path, sizeof(file_path), "%s/%s", base_path, fs->filename);
+    // snprintf(file_path, sizeof(file_path), "%s/%s", base_path, fs->filename);
+
+    if (strlen(fs->folder_path) > 0 && strcmp(fs->folder_path, "root") != 0) {
+        snprintf(file_path, sizeof(file_path), "%s/%s/%s", 
+                 base_path, fs->folder_path, fs->filename);
+    } else {
+        snprintf(file_path, sizeof(file_path), "%s/root/%s", 
+                 base_path, fs->filename);
+    }
 
     FILE *fp = fopen(file_path, "r");
     if (!fp) {
         // File doesn't exist yet, that's okay
+        checkpoint_load_from_disk(fs, base_path);
         return 0;
     }
 
@@ -381,6 +415,7 @@ int fs_load_from_disk(FileStructure *fs, const char *base_path) {
 
     if (file_size <= 0) {
         fclose(fp);
+        checkpoint_load_from_disk(fs, base_path);
         return 0;
     }
 
@@ -397,6 +432,8 @@ int fs_load_from_disk(FileStructure *fs, const char *base_path) {
     // Parse content into structure
     fs_parse_content(fs, content);
     free(content);
+
+    checkpoint_load_from_disk(fs, base_path);
 
     printf("[FS] Loaded file from disk: %s (%d sentences)\n", 
            fs->filename, fs->sentence_count);
@@ -604,7 +641,18 @@ int fs_write_to_disk(FileStructure *fs, const char *base_path) {
     }
 
     char file_path[MAX_FILENAME * 2];
-    snprintf(file_path, sizeof(file_path), "%s/%s", base_path, fs->filename);
+
+    if (strlen(fs->folder_path) > 0 && strcmp(fs->folder_path, "root") != 0) {
+        // File is in a subfolder
+        snprintf(file_path, sizeof(file_path), "%s/%s/%s", 
+                 base_path, fs->folder_path, fs->filename);
+    } else {
+        // File is in root folder
+        snprintf(file_path, sizeof(file_path), "%s/root/%s", 
+                 base_path, fs->filename);
+    }
+
+    // snprintf(file_path, sizeof(file_path), "%s/%s", base_path, fs->filename);
 
     FILE *fp = fopen(file_path, "w");
     if (!fp) {
