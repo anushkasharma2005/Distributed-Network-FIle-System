@@ -102,6 +102,30 @@ void handle_remaccess_command(int client_fd, const char* file_path,
  */
 void handle_view_command(int client_fd, const char* flags, const char* username);
 
+/**
+ * Handle EXEC command
+ * @param client_fd Client socket
+ * @param file_path Path of the file to execute
+ * @param username Username of requester
+ */
+void handle_exec_command(int client_fd, const char* file_path, const char* username);
 
+/**
+ * Helper: NS connects to SS as a client and reads file content
+ * Returns malloc'd string with file content (caller must free), or NULL on error
+ */
+char* ns_read_file_from_ss(FileInfo* file_info);
+
+
+/**
+ * Parse commands from a single line by detecting known command names
+ * Input: "ls sleep 5 echo after_party"
+ * Output: ["ls", "sleep 5", "echo after_party"]
+ *
+ * @param line Input line containing multiple commands
+ * @param commands Output array of command strings (caller must free)
+ * @return Number of commands parsed
+ */
+int parse_commands_from_line(const char* line, char*** commands);
 
 #endif // CLIENT_COMMANDS_H
