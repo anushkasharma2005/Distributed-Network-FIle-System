@@ -140,6 +140,31 @@ int main(int argc, char *argv[])
         case MSG_VIEWFOLDER:
             result = cmd_viewfolder(&client, cmd.filename);
             break;
+        case MSG_REQUEST_ACCESS:
+            {
+                const char *access_type = cmd.read_access ? "-r" : "-w";
+                result = cmd_request_access(&client, cmd.filename, access_type);
+            }
+            break;
+            
+        case MSG_VIEW_REQUESTS:
+            result = cmd_view_requests(&client);
+            break;
+            
+        case MSG_APPROVE_ACCESS:
+            {
+                const char *access_type = cmd.read_access ? "-r" : "-w";
+                result = cmd_approve_request(&client, cmd.filename, cmd.target_user, access_type);
+            }
+            break;
+            
+        case MSG_REJECT_ACCESS:
+            {
+                const char *access_type = cmd.read_access ? "-r" : "-w";
+                result = cmd_reject_request(&client, cmd.filename, cmd.target_user, access_type);
+            }
+            break;
+
 
         default:
             fprintf(stderr, "Unknown command type\n");
@@ -179,6 +204,16 @@ void print_help()
     printf("  ADDACCESS -R <file> <user> - Grant read access\n");
     printf("  ADDACCESS -W <file> <user> - Grant write access\n");
     printf("  REMACCESS <file> <user>    - Remove all access\n\n");
+    
+    printf("Access Requests:\n");
+    printf("  REQUEST <file> -r          - Request read access to file\n");
+    printf("  REQUEST <file> -w          - Request write access to file\n");
+    printf("  VIEWREQUESTS               - View pending access requests for your files\n");
+    printf("  APPROVE <file> <user> -r   - Approve user's read request\n");
+    printf("  APPROVE <file> <user> -w   - Approve user's write request\n");
+    printf("  REJECT <file> <user> -r    - Reject user's read request\n");
+    printf("  REJECT <file> <user> -w    - Reject user's write request\n\n");
+    
     printf("Checkpoint Operations:\n");
     printf("  CHECKPOINT <file> <tag>       - Create a checkpoint with given tag\n");
     printf("  VIEWCHECKPOINT <file> <tag>   - View checkpoint content\n");

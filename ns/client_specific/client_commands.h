@@ -171,5 +171,29 @@ void handle_move_command(int client_fd, const char* filename, const char* folder
  */
 void handle_viewfolder_command(int client_fd, const char* folderpath, const char* username);
 
+/**
+ * Handle REQUEST command - request access to file
+ */
+void handle_request_command(int client_fd, const char* file_path, 
+                           const char* requester, const char* access_type);
 
+/**
+ * Handle VIEWREQUESTS command - view pending requests
+ */
+void handle_viewrequests_command(int client_fd, const char* owner);
+
+/**
+ * Handle APPROVE command - approve access request
+ */
+void handle_approve_command(int client_fd, const char* file_path,
+                           const char* username, const char* access_type,
+                           const char* owner);
+
+/**
+ * Handle REJECT command - reject access request
+ */
+void handle_reject_command(int client_fd, const char* file_path,
+                          const char* username, const char* access_type,
+                          const char* owner);
+                          
 #endif // CLIENT_COMMANDS_H

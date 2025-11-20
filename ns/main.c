@@ -5,6 +5,7 @@
 #include "registry/file_registry.h" 
 #include "registry/user_registry.h"
 #include "registry/cache.h" 
+#include "registry/access_request_registry.h"
 #include "../include/constants.h"
 #include <stdio.h>
 
@@ -34,7 +35,8 @@ int main() {
     cleanup_file_registry();
     cleanup_user_registry();
     cleanup_cache();
-
+    cleanup_access_request_registry();
+    
     // Shutdown servers by closing their sockets. 
     shutdown_main_server(fds);
 
