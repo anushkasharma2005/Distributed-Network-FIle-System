@@ -219,13 +219,13 @@ int ss_handle_ns_commands(int sock_fd, const char *base_path, ClientManager *cli
 
         // DEBUG: Print what we received
 
-        printf("[DEBUG SS] Received ProtocolMessage:\n");
-        printf("  - sizeof(ProtocolMessage) = %zu bytes\n", sizeof(ProtocolMessage));
-        printf("  - msg.type (raw) = %d (hex: 0x%08x)\n", msg.type, msg.type);
-        printf("  - msg.status (raw) = %d (hex: 0x%08x)\n", msg.status, msg.status);
-        printf("  - msg.data = '%s' (length: %zu)\n", msg.data, strlen(msg.data));
-        printf("  - msg.message = '%s'\n", msg.message);
-        printf("  - First 32 bytes of data field (hex): ");
+        // printf("[DEBUG SS] Received ProtocolMessage:\n");
+        // printf("  - sizeof(ProtocolMessage) = %zu bytes\n", sizeof(ProtocolMessage));
+        // printf("  - msg.type (raw) = %d (hex: 0x%08x)\n", msg.type, msg.type);
+        // printf("  - msg.status (raw) = %d (hex: 0x%08x)\n", msg.status, msg.status);
+        // printf("  - msg.data = '%s' (length: %zu)\n", msg.data, strlen(msg.data));
+        // printf("  - msg.message = '%s'\n", msg.message);
+        // printf("  - First 32 bytes of data field (hex): ");
         for (int i = 0; i < 32 && i < (int)sizeof(msg.data); i++)
         {
             printf("%02x ", (unsigned char)msg.data[i]);
@@ -235,10 +235,10 @@ int ss_handle_ns_commands(int sock_fd, const char *base_path, ClientManager *cli
         // CONVERT FROM NETWORK BYTE ORDER
         int command_type = ntohl(msg.type);
 
-        printf("[DEBUG SS] After ntohl:\n");
-        printf("  - command_type = %d\n", command_type);
-        printf("  - Expected MSG_CREATE_FILE = %d\n", MSG_CREATE_FILE);
-        printf("  - Expected MSG_DELETE_FILE = %d\n", MSG_DELETE_FILE);
+        // printf("[DEBUG SS] After ntohl:\n");
+        // printf("  - command_type = %d\n", command_type);
+        // printf("  - Expected MSG_CREATE_FILE = %d\n", MSG_CREATE_FILE);
+        // printf("  - Expected MSG_DELETE_FILE = %d\n", MSG_DELETE_FILE);
 
         printf("[SS] Received command type: %d, data: %s\n",
                command_type, msg.data);

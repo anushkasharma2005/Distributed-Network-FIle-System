@@ -83,7 +83,7 @@ int main(int argc, char *argv[]) {
     int nm_port = 9002;      // Port for NM connection
     int client_port = 9003;  // Port for client connections
     char base_path[256] = "./storage";
-    char ss_ip[16] = "127.0.0.1";
+    char ss_ip[16] = "10.2.131.200";
     
     // Parse command line arguments
     if (argc >= 5) {
@@ -91,6 +91,11 @@ int main(int argc, char *argv[]) {
         ns_port = atoi(argv[2]);
         nm_port = atoi(argv[3]);
         client_port = atoi(argv[4]);
+    }
+
+    if (argc >= 6) {
+        strncpy(base_path, argv[5], sizeof(base_path) - 1);
+        base_path[sizeof(base_path) - 1] = '\0';
     }
     
     // Create unique storage directory based on IP and client port
