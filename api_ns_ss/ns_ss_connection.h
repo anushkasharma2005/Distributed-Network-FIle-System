@@ -33,6 +33,9 @@ typedef enum
     MSG_CREATE_FOLDER = 17,
     MSG_MOVE_FILE = 18,
     MSG_VIEW_FOLDER = 19,
+    MSG_READ_FILE,
+    MSG_COPY_FILE,
+    MSG_INFO_FILE,
 } MessageType;
 
 // Structure for file information

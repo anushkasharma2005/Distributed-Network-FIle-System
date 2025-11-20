@@ -3,6 +3,7 @@
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <time.h>
+#include <sys/wait.h>
 
 #include "client_commands.h"
 #include "../registry/ss_selector.h"
@@ -11,8 +12,8 @@
 #include "../registry/user_registry.h"
 #include "../../api_c_ns/networking.h"
 #include "./handle_client_server.h"
-
-
+#include "../../api_c_ss/client_ss_connection.h" 
+#include "../../api_c_ns/client_api.h"
 
 
 
@@ -164,6 +165,14 @@
         }
         
         handle_file_operation_command(client_fd, file_path, command);
+    }else if (strcmp(command, "EXEC") == 0) {
+    
+        if (!has_read_access(file_path, username)) {
+            send_message(client_fd, "ERROR: Read access denied");
+            printf("[NS-Client][EXEC] ✗ Access denied for '%s' by '%s'\n", file_path, username);
+            return;
+        }
+        handle_exec_command(client_fd, file_path, username);
     }else {
         const char* response = "ERROR: Unknown command";
         send_message(client_fd, response);
@@ -978,4 +987,269 @@ void handle_viewfolder_command(int client_fd, const char* folderpath, const char
         printf("[NS-Client][VIEWFOLDER] ✗ Error status %d: %s\n", 
                response_status, response.message);
     }
+}
+
+/**
+ * Handle EXEC command - executes file content as shell commands on NS
+ */
+void handle_exec_command(int client_fd, const char* file_path, const char* username) {
+    printf("[NS-Client][EXEC] User '%s' executing file '%s'\n", username, file_path);
+    
+    // 1. Check if file exists and is active
+    FileInfo* file_info = find_file(file_path);
+    if (!file_info || !file_info->is_active) {
+        send_message(client_fd, "ERROR: File not found");
+        send_message(client_fd, "EXEC_END");
+        printf("[NS-Client][EXEC] ✗ File '%s' not found\n", file_path);
+        return;
+    }
+    
+    // 2. Check if SS is active
+    StorageServerInfo* ss = find_storage_server_by_address(file_info->ss_ip, file_info->ss_nm_port);
+    if (!ss || !ss->is_active) {
+        send_message(client_fd, "ERROR: Storage server not available");
+        send_message(client_fd, "EXEC_END");
+        printf("[NS-Client][EXEC] ✗ SS not available for '%s'\n", file_path);
+        return;
+    }
+    
+    // 3. Read file content from SS (NS acts as client)
+    char* file_content = ns_read_file_from_ss(file_info);
+    if (!file_content) {
+        send_message(client_fd, "ERROR: Failed to read file from storage server");
+        send_message(client_fd, "EXEC_END");
+        printf("[NS-Client][EXEC] ✗ Failed to read '%s' from SS\n", file_path);
+        return;
+    }
+    
+    printf("[NS-Client][EXEC] Executing commands from '%s':\n", file_path);
+    printf("[NS-Client][EXEC] Raw content: '%s'\n", file_content);
+    
+    // 4. Parse commands from single-line content
+    char** commands = NULL;
+    int num_commands = parse_commands_from_line(file_content, &commands);
+    
+    if (num_commands == 0) {
+        send_message(client_fd, "(no commands to execute)");
+        send_message(client_fd, "EXEC_END");
+        free(file_content);
+        return;
+    }
+    
+    printf("[NS-Client][EXEC] Parsed %d commands\n", num_commands);
+    
+    // 5. Execute each command
+    char output_buffer[MAX_BUFFER_SIZE * 4];
+    int offset = 0;
+    
+    for (int i = 0; i < num_commands; i++) {
+        char* cmd = commands[i];
+        
+        // Skip empty commands
+        if (strlen(cmd) == 0) continue;
+        
+        printf("[NS-Client][EXEC]   [%d] $ %s\n", i+1, cmd);
+        
+        // Execute command and capture output
+        FILE* pipe = popen(cmd, "r");
+        if (pipe == NULL) {
+            offset += snprintf(output_buffer + offset,
+                             sizeof(output_buffer) - offset,
+                             "ERROR: Failed to execute: %s\n", cmd);
+        } else {
+            char cmd_output[1024];
+            while (fgets(cmd_output, sizeof(cmd_output), pipe) != NULL) {
+                // Check buffer space
+                if (offset + strlen(cmd_output) >= sizeof(output_buffer) - 100) {
+                    offset += snprintf(output_buffer + offset,
+                                     sizeof(output_buffer) - offset,
+                                     "\n... output truncated\n");
+                    pclose(pipe);
+                    goto cleanup;
+                }
+                
+                offset += snprintf(output_buffer + offset,
+                                 sizeof(output_buffer) - offset,
+                                 "%s", cmd_output);
+            }
+            
+            int exit_status = pclose(pipe);
+            if (exit_status != 0) {
+                offset += snprintf(output_buffer + offset,
+                                 sizeof(output_buffer) - offset,
+                                 "[Command exited with status %d]\n", 
+                                 WEXITSTATUS(exit_status));
+            }
+        }
+    }
+    
+    cleanup:
+        // Free parsed commands
+        for (int i = 0; i < num_commands; i++) {
+            free(commands[i]);
+        }
+        free(commands);
+        free(file_content);
+        
+        // 6. Send output to client in chunks if needed
+        if (offset == 0) {
+            send_message(client_fd, "(no output)");
+        } else {
+            // Send in chunks to avoid buffer overflow
+            const int CHUNK_SIZE = 7000;  // Safe size within MAX_BUFFER_SIZE
+            int pos = 0;
+            
+            while (pos < offset) {
+                int remaining = offset - pos;
+                int to_send = (remaining > CHUNK_SIZE) ? CHUNK_SIZE : remaining;
+                
+                char chunk[MAX_BUFFER_SIZE];
+                strncpy(chunk, output_buffer + pos, to_send);
+                chunk[to_send] = '\0';
+                
+                send_message(client_fd, chunk);
+                pos += to_send;
+                
+                printf("[NS-Client][EXEC]   Sent chunk: %d bytes (pos: %d/%d)\n", 
+                    to_send, pos, offset);
+            }
+        }
+        
+        // Send end signal
+        send_message(client_fd, "EXEC_END");
+        
+        printf("[NS-Client][EXEC] ✓ Execution complete for '%s'\n", file_path);
+        printf("[NS-Client][EXEC]   Total output size: %d bytes\n", offset);
+}
+
+
+/**
+ * Helper: NS connects to SS as a client and reads file content
+ * Returns malloc'd string with file content (caller must free), or NULL on error
+ */
+char* ns_read_file_from_ss(FileInfo* file_info) {
+    if (!file_info) {
+        return NULL;
+    }
+    
+    // Connect to SS as a client
+    int ss_fd = init_client(file_info->ss_ip, file_info->ss_client_port);
+    if (ss_fd < 0) {
+        fprintf(stderr, "[NS-EXEC] Failed to connect to SS at %s:%d\n", 
+                file_info->ss_ip, file_info->ss_client_port);
+        return NULL;
+    }
+    
+    // Send READ request (using client-SS protocol)
+    ClientRequest req;
+    memset(&req, 0, sizeof(ClientRequest));
+    req.op_type = OP_READ;  // OP_READ = 1
+    strncpy(req.filename, file_info->file_path, sizeof(req.filename) - 1);
+    
+    if (send(ss_fd, &req, sizeof(ClientRequest), 0) != sizeof(ClientRequest)) {
+        fprintf(stderr, "[NS-EXEC] Failed to send READ request to SS\n");
+        close(ss_fd);
+        return NULL;
+    }
+    
+    // Receive response
+    ClientRequest resp;
+    ssize_t received = recv(ss_fd, &resp, sizeof(ClientRequest), 0);
+    close(ss_fd);
+    
+    if (received != sizeof(ClientRequest)) {
+        fprintf(stderr, "[NS-EXEC] Failed to receive response from SS\n");
+        return NULL;
+    }
+    
+    if (resp.status != 0) {
+        fprintf(stderr, "[NS-EXEC] SS returned error: %s\n", resp.error_msg);
+        return NULL;
+    }
+    
+    // Duplicate the content (caller must free)
+    return strdup(resp.content);
+}
+
+
+
+/**
+ * Parse commands from a single line by detecting known command names
+ * Input: "ls sleep 5 echo after_party"
+ * Output: ["ls", "sleep 5", "echo after_party"]
+ * 
+ * @param line Input line containing multiple commands
+ * @param commands Output array of command strings (caller must free)
+ * @return Number of commands parsed
+ */
+int parse_commands_from_line(const char* line, char*** commands) {
+    // List of common shell commands to detect boundaries
+    const char* known_commands[] = {
+        "ls", "echo", "cat", "grep", "sleep", "pwd", "date", "whoami",
+        "cd", "cp", "mv", "rm", "mkdir", "touch", "chmod", "chown",
+        "ps", "top", "kill", "df", "du", "find", "wc", "sort", "uniq",
+        "head", "tail", "awk", "sed", "tar", "gzip", "wget", "curl",
+        NULL
+    };
+    
+    char* line_copy = strdup(line);
+    char* saveptr;
+    char* word = strtok_r(line_copy, " \t", &saveptr);
+    
+    // Allocate array for commands (max 100 commands)
+    *commands = malloc(100 * sizeof(char*));
+    int cmd_count = 0;
+    
+    char current_cmd[MAX_BUFFER_SIZE] = "";
+    
+    while (word != NULL) {
+        // Check if this word is a known command
+        bool is_command = false;
+        for (int i = 0; known_commands[i] != NULL; i++) {
+            if (strcmp(word, known_commands[i]) == 0) {
+                is_command = true;
+                break;
+            }
+        }
+        
+        if (is_command) {
+            // Save previous command if it exists
+            if (strlen(current_cmd) > 0) {
+                // Trim trailing space
+                size_t len = strlen(current_cmd);
+                if (len > 0 && current_cmd[len-1] == ' ') {
+                    current_cmd[len-1] = '\0';
+                }
+                
+                (*commands)[cmd_count] = strdup(current_cmd);
+                cmd_count++;
+                current_cmd[0] = '\0';
+            }
+            
+            // Start new command
+            strcpy(current_cmd, word);
+            strcat(current_cmd, " ");
+        } else {
+            // Add word to current command
+            strcat(current_cmd, word);
+            strcat(current_cmd, " ");
+        }
+        
+        word = strtok_r(NULL, " \t", &saveptr);
+    }
+    
+    // Save last command
+    if (strlen(current_cmd) > 0) {
+        // Trim trailing space
+        size_t len = strlen(current_cmd);
+        if (len > 0 && current_cmd[len-1] == ' ') {
+            current_cmd[len-1] = '\0';
+        }
+        
+        (*commands)[cmd_count] = strdup(current_cmd);
+        cmd_count++;
+    }
+    
+    free(line_copy);
+    return cmd_count;
 }

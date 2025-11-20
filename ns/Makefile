@@ -29,7 +29,7 @@ NS_OBJ = $(NS_SRC:.c=.o)
 CLIENT_OBJ = $(CLIENT_SRC:.c=.o)
 SS_OBJ = $(SS_SRC:.c=.o)
 REGISTRY_OBJ = $(REGISTRY_SRC:.c=.o)
-API_OBJ = $(API_DIR)/networking.o $(API_DIR)/naming_server.o
+API_OBJ = $(API_DIR)/networking.o $(API_DIR)/naming_server.o $(API_DIR)/client_api.o
 
 ALL_OBJ = $(NS_OBJ) $(CLIENT_OBJ) $(SS_OBJ) $(REGISTRY_OBJ)
 

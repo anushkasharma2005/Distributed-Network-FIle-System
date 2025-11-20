@@ -236,7 +236,8 @@ int cmd_exec(Client *client, const char *filename) {
         printf("%s", response);
         fflush(stdout);
     }
-
+    
+    printf("\n");
     return SUCCESS;
 }
 

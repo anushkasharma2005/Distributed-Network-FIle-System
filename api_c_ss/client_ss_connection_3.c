@@ -2,6 +2,7 @@
 #include "file_structure.h"
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 /**
  * Handle CHECKPOINT command - create a checkpoint

@@ -98,7 +98,7 @@ void* accept_clients(void* arg) {
         printf("═══════════════════════════════════════════\n");
 
         // Allocate memory for thread data
-        ClientThreadData* thread_data = malloc(sizeof(ClientThreadData));
+        ClientThreadData_NS* thread_data = malloc(sizeof(ClientThreadData_NS));
         if (!thread_data) {
             fprintf(stderr, "[NS ERROR][Handle_Client] Failed to allocate memory for thread data\n");
             close_socket(client_fd);
@@ -146,7 +146,7 @@ void* handle_client(void* arg) {
         first_time = 0;
     }
 
-    ClientThreadData* data = (ClientThreadData*)arg;
+    ClientThreadData_NS* data = (ClientThreadData_NS*)arg;
     int client_fd = data->client_fd;
     Connection client_conn = data->client_conn;
     
