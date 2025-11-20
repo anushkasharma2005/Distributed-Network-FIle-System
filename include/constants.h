@@ -112,6 +112,8 @@
 #define MAX_WORD_LENGTH 256
 #define MAX_FILENAME 256
 #define MAX_WHITESPACE 64  // Max whitespace to preserve after each word
+// Soft delete configuration
+#define DELETE_EXPIRY_MINUTES 5  // Files can be restored within 5 minutes
 
 
 #endif // PROJECT_CONSTANTS_H

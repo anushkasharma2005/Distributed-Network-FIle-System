@@ -142,8 +142,13 @@
             send_message(client_fd, "ERROR: Only file owner can delete");
             return;
         }
-        handle_file_operation_command(client_fd, file_path, command);
-
+        handle_delete_command(client_fd, file_path, username);  // CHANGED
+    } else if (strcmp(command, "RESTORE") == 0) { 
+        if (!is_file_owner(file_path, username)) {
+            send_message(client_fd, "ERROR: Only file owner can restore");
+            return;
+        }
+        handle_restore_command(client_fd, file_path, username);
 
     }else if (strcmp(command, "READ") == 0 || 
                strcmp(command, "STREAM") == 0) {
@@ -189,18 +194,43 @@
 void handle_create_command(int client_fd, const char* file_path, const char* owner) {
     FileInfo* existing = find_file(file_path);
     
-    if (existing != NULL && existing->is_active) {
-        char response[512];
-        snprintf(response, sizeof(response),
-                "FILE_EXISTS %s %d",
-                existing->ss_ip, existing->ss_client_port);
+    if (existing != NULL) {
+        if (existing->is_active) {
+            // File exists and is active
+            char response[512];
+            snprintf(response, sizeof(response),
+                    "FILE_EXISTS %s %d",
+                    existing->ss_ip, existing->ss_client_port);
+            
+            send_message(client_fd, response);
+            
+            printf("[NS-Client][Client_commands] ⚠ File '%s' already exists on SS #%d\n",
+                   file_path, existing->ss_id);
+            return;
+        }
         
-        send_message(client_fd, response);
-        
-        printf("[NS-Client][Client_commands] ⚠ File '%s' already exists on SS #%d\n",
-               file_path, existing->ss_id);
-        return;
+        // File exists but is deleted
+        if (is_delete_expired(existing)) {
+            // Expired - purge old file and allow creation
+            printf("[NS-Client][CREATE] Purging expired deleted file '%s'\n", file_path);
+            permanently_delete_file(file_path);
+            // Continue to create new file below
+        } else {
+            // Recently deleted - cannot reuse name yet
+            time_t now = time(NULL);
+            int minutes_left = DELETE_EXPIRY_MINUTES - ((now - existing->deleted_at) / 60);
+            
+            char error[512];
+            snprintf(error, sizeof(error),
+                    "ERROR: File name unavailable (deleted %d minutes ago, wait %d more minutes)",
+                    (int)((now - existing->deleted_at) / 60), minutes_left);
+            send_message(client_fd, error);
+            
+            printf("[NS-Client][CREATE] ✗ Name '%s' blocked by recent deletion\n", file_path);
+            return;
+        }
     }
+    
     
     StorageServerInfo* selected_ss = select_ss_for_file();
     
@@ -1252,4 +1282,65 @@ int parse_commands_from_line(const char* line, char*** commands) {
     
     free(line_copy);
     return cmd_count;
+}
+
+
+/**
+ * Handle DELETE command - soft delete with expiry
+ */
+void handle_delete_command(int client_fd, const char* file_path, const char* username) {
+    printf("[NS-Client][DELETE] User '%s' deleting '%s'\n", username, file_path);
+    
+    FileInfo* file = find_file(file_path);
+    if (!file) {
+        send_message(client_fd, "ERROR: File not found");
+        return;
+    }
+    
+    if (!file->is_active) {
+        send_message(client_fd, "ERROR: File already deleted");
+        return;
+    }
+    
+    // Soft delete
+    if (soft_delete_file(file_path) == 0) {
+        char response[512];
+        snprintf(response, sizeof(response),
+                "SUCCESS: File deleted (can restore within %d minutes using RESTORE command)",
+                DELETE_EXPIRY_MINUTES);
+        send_message(client_fd, response);
+        
+        printf("[NS-Client][DELETE] ✓ Soft deleted '%s'\n", file_path);
+    } else {
+        send_message(client_fd, "ERROR: Failed to delete file");
+    }
+}
+
+/**
+ * Handle RESTORE command
+ */
+void handle_restore_command(int client_fd, const char* file_path, const char* username) {
+    printf("[NS-Client][RESTORE] User '%s' restoring '%s'\n", username, file_path);
+    
+    FileInfo* file = find_file(file_path);
+    if (!file) {
+        send_message(client_fd, "ERROR: File not found");
+        return;
+    }
+    
+    if (file->is_active) {
+        send_message(client_fd, "ERROR: File is not deleted");
+        return;
+    }
+    
+    int result = restore_file(file_path);
+    
+    if (result == 0) {
+        send_message(client_fd, "SUCCESS: File restored successfully");
+        printf("[NS-Client][RESTORE] ✓ Restored '%s'\n", file_path);
+    } else if (result == -2) {
+        send_message(client_fd, "ERROR: Cannot restore - file deletion expired");
+    } else {
+        send_message(client_fd, "ERROR: Failed to restore file");
+    }
 }
