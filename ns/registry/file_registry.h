@@ -22,6 +22,8 @@ typedef struct FileInfo {
     char* owner;                    // Owner ID
     bool is_active;                 // Is file still available?
 
+    time_t deleted_at;
+
     char** read_users;              // Array of usernames with read-only access
     int read_count;
     int read_capacity;
@@ -185,5 +187,35 @@ int get_accessible_files(const char* username, FileInfo** files, int max_size, b
  * @return 0 on success, -1 on error
  */
 int update_file_metadata(const char* file_path);
+
+/**
+ * Soft delete a file (mark inactive with timestamp)
+ * @param file_path File path
+ * @return 0 on success, -1 on error
+ */
+int soft_delete_file(const char* file_path);
+
+/**
+ * Restore a soft-deleted file
+ * @param file_path File path
+ * @return 0 on success, -1 on error
+ */
+int restore_file(const char* file_path);
+
+/**
+ * Check if a deleted file has expired (can be purged)
+ * @param file File info
+ * @return true if expired, false otherwise
+ */
+bool is_delete_expired(FileInfo* file);
+
+/**
+ * Permanently delete file (remove from NS + SS)
+ * @param file_path File path
+ * @return 0 on success, -1 on error
+ */
+int permanently_delete_file(const char* file_path);
+
+
 
 #endif // FILE_REGISTRY_H

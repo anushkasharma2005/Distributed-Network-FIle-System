@@ -125,18 +125,18 @@ int main(int argc, char *argv[])
         case MSG_REVERT:
             result = cmd_revert(&client, cmd.filename, cmd.content);
             break;
+        case MSG_RESTORE:
+            result = cmd_restore(&client, cmd.filename);
+            break;
         case MSG_LISTCHECKPOINTS:
             result = cmd_listcheckpoints(&client, cmd.filename);
             break;
-
         case MSG_CREATEFOLDER:
             result = cmd_createfolder(&client, cmd.filename);
             break;
-        
         case MSG_MOVE:
             result = cmd_move(&client, cmd.filename, cmd.content);
             break;
-        
         case MSG_VIEWFOLDER:
             result = cmd_viewfolder(&client, cmd.filename);
             break;

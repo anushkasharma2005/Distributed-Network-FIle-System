@@ -1,10 +1,16 @@
 #include "file_registry.h"
-#include "../registry/ss_registry.h"
 #include "../../api_ns_ss/ns_ss_connection.h"
+#include "../registry/ss_registry.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 #include <time.h>
+#include <arpa/inet.h>
+#include "ss_registry.h"
+#include "../../api_ns_ss/ns_ss_connection.h"
+#include "../../api_c_ns/networking.h"
+#include "cache.h"
+
 
 // Global file registry
 FileHashTable file_registry;
@@ -81,6 +87,7 @@ int register_file(const char* file_path, int ss_id, const char* ss_ip, int ss_cl
     new_node->value->is_active = true;
     new_node->value->ss_nm_port = ss_nm_port;
     new_node->value->owner = strdup(owner);
+    new_node->value->deleted_at = 0;
 
     new_node->value->read_users = calloc(MAX_ACCESS_USERS, sizeof(char*));
     new_node->value->write_users = calloc(MAX_ACCESS_USERS, sizeof(char*));
@@ -113,6 +120,11 @@ int register_file(const char* file_path, int ss_id, const char* ss_ip, int ss_cl
     
     pthread_mutex_unlock(&file_registry.mutex);
     
+
+    // Invalidate cache (new file registered)
+    cache_invalidate_file(file_path);
+
+
     printf("[File-Registry] ✓ Registered file '%s' on SS #%d at bucket %u (Total: %d)\n",
            file_path, ss_id, index, file_registry.count);
     
@@ -125,6 +137,18 @@ int register_file(const char* file_path, int ss_id, const char* ss_ip, int ss_cl
 FileInfo* find_file(const char* file_path) {
     if (!file_path) return NULL;
     
+
+    // TRY CACHE FIRST
+    FileInfo* cached = cache_get_file(file_path);
+    if (cached) {
+        // Update last accessed time even for cached lookups
+        pthread_mutex_lock(&file_registry.mutex);
+        cached->last_accessed = time(NULL);
+        pthread_mutex_unlock(&file_registry.mutex);
+        return cached;
+    }
+
+    // CACHE MISS - do actual search
     pthread_mutex_lock(&file_registry.mutex);
     
     unsigned int index = hash_file_path(file_path);
@@ -141,6 +165,10 @@ FileInfo* find_file(const char* file_path) {
             
             result->last_accessed = time(NULL);
             pthread_mutex_unlock(&file_registry.mutex);
+            
+            // STORE IN CACHE for next time
+            cache_put_file(file_path, result);
+
             return result;
         }
         current = current->next;
@@ -192,6 +220,9 @@ int unregister_file(const char* file_path) {
             
             pthread_mutex_unlock(&file_registry.mutex);
             
+            // Invalidate cache
+            cache_invalidate_file(file_path);
+
             printf("[File-Registry] Unregistered file '%s' (Total: %d)\n",
                    file_path, file_registry.count);
             
@@ -730,4 +761,128 @@ int update_file_metadata(const char* file_path) {
     }
     
     return -1;
+}
+
+/**
+ * Soft delete a file
+ */
+int soft_delete_file(const char* file_path) {
+    if (!file_path) return -1;
+    
+    FileInfo* file = find_file(file_path);
+    if (!file) {
+        return -1;
+    }
+    
+    pthread_mutex_lock(&file_registry.mutex);
+    
+    if (!file->is_active) {
+        pthread_mutex_unlock(&file_registry.mutex);
+        return -1;  // Already deleted
+    }
+    
+    file->is_active = false;
+    file->deleted_at = time(NULL);
+    
+    pthread_mutex_unlock(&file_registry.mutex);
+
+    // Invalidate cache
+    cache_invalidate_file(file_path);
+    
+    printf("[File-Registry] ✓ Soft deleted '%s' (can restore within %d minutes)\n",
+           file_path, DELETE_EXPIRY_MINUTES);
+    
+    return 0;
+}
+
+/**
+ * Restore a soft-deleted file
+ */
+int restore_file(const char* file_path) {
+    if (!file_path) return -1;
+    
+    FileInfo* file = find_file(file_path);
+    if (!file) {
+        return -1;
+    }
+    
+    pthread_mutex_lock(&file_registry.mutex);
+    
+    if (file->is_active) {
+        pthread_mutex_unlock(&file_registry.mutex);
+        return -1;  // Not deleted
+    }
+    
+    // Check if expired
+    if (is_delete_expired(file)) {
+        pthread_mutex_unlock(&file_registry.mutex);
+        printf("[File-Registry] ✗ Cannot restore '%s' - expired\n", file_path);
+        return -2;  // Expired
+    }
+    
+    file->is_active = true;
+    file->deleted_at = 0;
+    
+    pthread_mutex_unlock(&file_registry.mutex);
+    
+    // Invalidate cache
+    cache_invalidate_file(file_path);
+    
+    printf("[File-Registry] ✓ Restored file '%s'\n", file_path);
+    
+    return 0;
+}
+
+/**
+ * Check if deleted file has expired
+ */
+bool is_delete_expired(FileInfo* file) {
+    if (!file || file->is_active || file->deleted_at == 0) {
+        return false;
+    }
+    
+    time_t now = time(NULL);
+    int minutes_elapsed = (now - file->deleted_at) / 60;
+    
+    return (minutes_elapsed >= DELETE_EXPIRY_MINUTES);
+}
+
+/**
+ * Permanently delete file from NS and SS
+ */
+int permanently_delete_file(const char* file_path) {
+    if (!file_path) return -1;
+    
+    FileInfo* file = find_file(file_path);
+    if (!file) {
+        return -1;
+    }
+    
+    // Get SS info before unregistering
+    StorageServerInfo* ss = find_storage_server_by_address(file->ss_ip, file->ss_nm_port);
+    
+    if (ss && ss->is_active) {
+        // Send DELETE command to SS
+        pthread_mutex_lock(&ss->socket_mutex);
+        
+        ProtocolMessage msg;
+        memset(&msg, 0, sizeof(ProtocolMessage));
+        msg.type = htonl(MSG_DELETE_FILE);
+        strncpy(msg.data, file_path, sizeof(msg.data) - 1);
+        
+        send_protocol_message(ss->ss_fd, &msg);
+        
+        pthread_mutex_unlock(&ss->socket_mutex);
+        
+        printf("[File-Registry] Sent DELETE request to SS for '%s'\n", file_path);
+    }
+    
+    // Remove from NS registry
+    int result = unregister_file(file_path);
+    
+    if (result == 0) {
+        printf("[File-Registry] ✓ Permanently deleted '%s'\n", file_path);
+    }
+    
+    return result;
 }

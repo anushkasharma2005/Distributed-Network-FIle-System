@@ -328,3 +328,32 @@ int cmd_rem_access(Client *client, const char *filename, const char *username) {
     printf("%s\n", response);
     return SUCCESS;
 }
+
+// RESTORE command - Restores a deleted file
+int cmd_restore(Client *client, const char *filename) {
+    if (!client || !client->connected || !filename) {
+        return ERR_INVALID_COMMAND;
+    }
+
+    char request[MAX_BUFFER_SIZE];
+    snprintf(request, sizeof(request), "RESTORE %s", filename);
+
+    if (send_to_nm(client, request, strlen(request)) != SUCCESS) {
+        return ERR_CONNECTION;
+    }
+
+    char response[MAX_BUFFER_SIZE];
+    int bytes = recv_from_nm(client, response, sizeof(response) - 1);
+    if (bytes <= 0) {
+        return ERR_CONNECTION;
+    }
+    response[bytes] = '\0';
+
+    if (strncmp(response, "ERROR", 5) == 0) {
+        fprintf(stderr, "%s\n", response);
+        return ERR_SERVER_ERROR;
+    }
+
+    printf("%s\n", response);
+    return SUCCESS;
+}

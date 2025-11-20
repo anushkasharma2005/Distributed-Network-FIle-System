@@ -267,6 +267,17 @@ int parse_command(const char *input, Command *cmd) {
         return SUCCESS;
     }
 
+    // Parse RESTORE command
+    if (strcmp(command, "RESTORE") == 0) {
+        cmd->type = MSG_RESTORE;
+        token = strtok(NULL, " \t");
+        if (!token) {
+            return ERR_INVALID_COMMAND;
+        }
+        strncpy(cmd->filename, token, MAX_FILENAME_LENGTH - 1);
+        return SUCCESS;
+    }
+
     // Parse LISTCHECKPOINTS command
     if (strcmp(command, "LISTCHECKPOINTS") == 0) {
         cmd->type = MSG_LISTCHECKPOINTS;

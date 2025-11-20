@@ -128,4 +128,48 @@ char* ns_read_file_from_ss(FileInfo* file_info);
  */
 int parse_commands_from_line(const char* line, char*** commands);
 
+
+/**
+ * Handle DELETE command - soft delete file
+ * @param client_fd Client socket file descriptor
+ * @param file_path Path of the file to delete
+ * @param username Username of requester
+ */
+void handle_delete_command(int client_fd, const char* file_path, const char* username);
+
+/**
+ * Handle RESTORE command - restore deleted file
+ * @param client_fd Client socket file descriptor
+ * @param file_path Path of the file to restore
+ * @param username Username of requester
+ */
+void handle_restore_command(int client_fd, const char* file_path, const char* username);
+
+
+/**
+ * Handle CREATEFOLDER command - create a new folder
+ * @param client_fd Client socket file descriptor
+ * @param folderpath Path of the folder to create
+ * @param username Username of requester
+ */
+void handle_createfolder_command(int client_fd, const char* folderpath, const char* username);
+
+/**
+ * Handle MOVE command - move file to folder
+ * @param client_fd Client socket file descriptor
+ * @param filename Name of the file to move
+ * @param folderpath Destination folder path
+ * @param username Username of requester
+ */
+void handle_move_command(int client_fd, const char* filename, const char* folderpath, const char* username);
+
+/**
+ * Handle VIEWFOLDER command - view folder contents
+ * @param client_fd Client socket file descriptor
+ * @param folderpath Path of the folder to view
+ * @param username Username of requester
+ */
+void handle_viewfolder_command(int client_fd, const char* folderpath, const char* username);
+
+
 #endif // CLIENT_COMMANDS_H

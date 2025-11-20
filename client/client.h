@@ -51,6 +51,7 @@
 #define MSG_CREATEFOLDER 18
 #define MSG_MOVE 19
 #define MSG_VIEWFOLDER 20
+#define MSG_RESTORE 21  
 
 // Client structure
 typedef struct
@@ -112,6 +113,7 @@ int cmd_listcheckpoints(Client *client, const char *filename);
 int cmd_createfolder(Client *client, const char *folderpath);
 int cmd_move(Client *client, const char *filename, const char *folderpath);
 int cmd_viewfolder(Client *client, const char *folderpath);
+int cmd_restore(Client *client, const char *filename);
 
 
 // Helper functions
