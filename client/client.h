@@ -48,6 +48,9 @@
 #define MSG_VIEWCHECKPOINT 15
 #define MSG_REVERT 16
 #define MSG_LISTCHECKPOINTS 17
+#define MSG_CREATEFOLDER 18
+#define MSG_MOVE 19
+#define MSG_VIEWFOLDER 20
 
 // Client structure
 typedef struct
@@ -106,6 +109,10 @@ int cmd_checkpoint(Client *client, const char *filename, const char *tag);
 int cmd_viewcheckpoint(Client *client, const char *filename, const char *tag);
 int cmd_revert(Client *client, const char *filename, const char *tag);
 int cmd_listcheckpoints(Client *client, const char *filename);
+int cmd_createfolder(Client *client, const char *folderpath);
+int cmd_move(Client *client, const char *filename, const char *folderpath);
+int cmd_viewfolder(Client *client, const char *folderpath);
+
 
 // Helper functions
 int send_to_nm(Client *client, const void *data, size_t len);

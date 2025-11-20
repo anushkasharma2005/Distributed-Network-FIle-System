@@ -185,7 +185,7 @@ BUILD_DIR = build
 BIN_DIR = bin
 
 # Source files from current directory (ss folder)
-SS_LOCAL_SRCS = file_structure_1.c file_structure_2.c file_structure_3.c main.c
+SS_LOCAL_SRCS = file_structure_1.c file_structure_2.c file_structure_3.c file_structure_4.c main.c
 
 # Source files from API directories
 NS_SS_SRC = $(API_NS_SS_DIR)/ns_ss_connection.c
@@ -194,7 +194,7 @@ C_SS_SRC_2 = $(API_C_SS_DIR)/client_ss_connection_2.c
 C_SS_SRC_3 = $(API_C_SS_DIR)/client_ss_connection_3.c
 
 # Object files
-SS_LOCAL_OBJS = $(BUILD_DIR)/file_structure_1.o $(BUILD_DIR)/file_structure_2.o $(BUILD_DIR)/file_structure_3.o $(BUILD_DIR)/storage_server_main.o
+SS_LOCAL_OBJS = $(BUILD_DIR)/file_structure_1.o $(BUILD_DIR)/file_structure_2.o $(BUILD_DIR)/file_structure_3.o $(BUILD_DIR)/file_structure_4.o $(BUILD_DIR)/storage_server_main.o
 NS_SS_OBJ = $(BUILD_DIR)/ns_ss_connection.o
 C_SS_OBJ = $(BUILD_DIR)/client_ss_connection.o
 C_SS_OBJ_2 = $(BUILD_DIR)/client_ss_connection_2.o
@@ -233,6 +233,10 @@ $(BUILD_DIR)/file_structure_2.o: file_structure_2.c file_structure.h | $(BUILD_D
 
 $(BUILD_DIR)/file_structure_3.o: file_structure_3.c file_structure.h | $(BUILD_DIR)
 	@echo "Compiling file_structure_3.c..."
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/file_structure_4.o: file_structure_4.c file_structure.h | $(BUILD_DIR)
+	@echo "Compiling file_structure_4.c..."
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/storage_server_main.o: main.c file_structure.h | $(BUILD_DIR)

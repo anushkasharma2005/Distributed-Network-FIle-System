@@ -129,6 +129,18 @@ int main(int argc, char *argv[])
             result = cmd_listcheckpoints(&client, cmd.filename);
             break;
 
+        case MSG_CREATEFOLDER:
+            result = cmd_createfolder(&client, cmd.filename);
+            break;
+        
+        case MSG_MOVE:
+            result = cmd_move(&client, cmd.filename, cmd.content);
+            break;
+        
+        case MSG_VIEWFOLDER:
+            result = cmd_viewfolder(&client, cmd.filename);
+            break;
+
         default:
             fprintf(stderr, "Unknown command type\n");
         }
@@ -158,6 +170,10 @@ void print_help()
     printf("  DELETE <filename>       - Delete a file\n");
     printf("  STREAM <filename>       - Stream file contents word-by-word\n");
     printf("  EXEC <filename>         - Execute file contents as shell commands\n\n");
+    printf("Folder Operations:\n");
+    printf("  CREATEFOLDER <path>     - Create folder hierarchy (e.g., root/docs/work)\n");
+    printf("  MOVE <file> <folder>    - Move file to folder\n");
+    printf("  VIEWFOLDER <path>       - List folder contents\n\n");
     printf("User & Access Control:\n");
     printf("  LIST                    - List all users in system\n");
     printf("  ADDACCESS -R <file> <user> - Grant read access\n");

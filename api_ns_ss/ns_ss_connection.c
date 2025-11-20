@@ -14,6 +14,7 @@
 
 volatile sig_atomic_t ns_connection_lost = 0;
 extern volatile sig_atomic_t keep_running;
+// extern ClientManager *g_client_manager;
 
 int ss_connect_to_ns(const char *ns_ip, int ns_port)
 {
@@ -70,8 +71,6 @@ int ss_send_message(int sock_fd, ProtocolMessage *msg)
     printf("type:%d\n", msg->type);
     printf("=====================================================\n");
     printf("\n\n\n");
-
-
 
     ssize_t sent = send(sock_fd, msg, sizeof(ProtocolMessage), 0);
     if (sent < 0)
@@ -203,7 +202,7 @@ int ss_send_heartbeat(int sock_fd)
     return ss_send_message(sock_fd, &msg);
 }
 
-int ss_handle_ns_commands(int sock_fd, const char *base_path)
+int ss_handle_ns_commands(int sock_fd, const char *base_path, ClientManager *client_manager)
 {
     ProtocolMessage msg, response;
     char file_path[MAX_PATH_LEN];
@@ -213,13 +212,13 @@ int ss_handle_ns_commands(int sock_fd, const char *base_path)
         if (ss_receive_message(sock_fd, &msg) < 0)
         {
             fprintf(stderr, "[SS] Connection to NS lost\n");
-            ns_connection_lost = 1;  // Set flag to signal shutdown
-            keep_running = 0;  // Stop the loop
+            ns_connection_lost = 1; // Set flag to signal shutdown
+            keep_running = 0;       // Stop the loop
             return -1;
         }
 
         // DEBUG: Print what we received
-        
+
         printf("[DEBUG SS] Received ProtocolMessage:\n");
         printf("  - sizeof(ProtocolMessage) = %zu bytes\n", sizeof(ProtocolMessage));
         printf("  - msg.type (raw) = %d (hex: 0x%08x)\n", msg.type, msg.type);
@@ -227,20 +226,21 @@ int ss_handle_ns_commands(int sock_fd, const char *base_path)
         printf("  - msg.data = '%s' (length: %zu)\n", msg.data, strlen(msg.data));
         printf("  - msg.message = '%s'\n", msg.message);
         printf("  - First 32 bytes of data field (hex): ");
-        for (int i = 0; i < 32 && i < (int)sizeof(msg.data); i++) {
+        for (int i = 0; i < 32 && i < (int)sizeof(msg.data); i++)
+        {
             printf("%02x ", (unsigned char)msg.data[i]);
         }
         printf("\n");
-        
+
         // CONVERT FROM NETWORK BYTE ORDER
         int command_type = ntohl(msg.type);
-        
+
         printf("[DEBUG SS] After ntohl:\n");
         printf("  - command_type = %d\n", command_type);
         printf("  - Expected MSG_CREATE_FILE = %d\n", MSG_CREATE_FILE);
         printf("  - Expected MSG_DELETE_FILE = %d\n", MSG_DELETE_FILE);
-        
-        printf("[SS] Received command type: %d, data: %s\n", 
+
+        printf("[SS] Received command type: %d, data: %s\n",
                command_type, msg.data);
         memset(&response, 0, sizeof(ProtocolMessage));
         response.type = htonl(MSG_FILE_OP_ACK);
@@ -249,7 +249,15 @@ int ss_handle_ns_commands(int sock_fd, const char *base_path)
         {
         case MSG_CREATE_FILE:
         {
-            snprintf(file_path, MAX_PATH_LEN, "%s/%s", base_path, msg.data);
+            // snprintf(file_path, MAX_PATH_LEN, "%s/%s", base_path, msg.data);
+            char full_path[MAX_PATH_LEN];
+            snprintf(full_path, MAX_PATH_LEN, "root/%s", msg.data);
+            snprintf(file_path, MAX_PATH_LEN, "%s/%s", base_path, full_path);
+
+            // Ensure root directory exists
+            char root_dir[MAX_PATH_LEN];
+            snprintf(root_dir, sizeof(root_dir), "%s/root", base_path);
+            mkdir(root_dir, 0755);
 
             FILE *fp = fopen(file_path, "w");
             if (fp)
@@ -267,6 +275,14 @@ int ss_handle_ns_commands(int sock_fd, const char *base_path)
                          "ERROR: Failed to create file: %s", strerror(errno));
                 fprintf(stderr, "[SS] ✗ Failed to create: %s\n", file_path);
             }
+
+            // Send response back to NS
+            if (send(sock_fd, &response, sizeof(ProtocolMessage), 0) < 0)
+            {
+                fprintf(stderr, "[SS] Failed to send CREATE response: %s\n", strerror(errno));
+                return -1;
+            }
+            printf("[SS] CREATE response sent (status: %d)\n", ntohl(response.status));
             break;
         }
 
@@ -288,6 +304,14 @@ int ss_handle_ns_commands(int sock_fd, const char *base_path)
                          "ERROR: Failed to delete: %s", strerror(errno));
                 fprintf(stderr, "[SS] ✗ Failed to delete: %s\n", file_path);
             }
+
+            // Send response back to NS
+            if (send(sock_fd, &response, sizeof(ProtocolMessage), 0) < 0)
+            {
+                fprintf(stderr, "[SS] Failed to send DELETE response: %s\n", strerror(errno));
+                return -1;
+            }
+            printf("[SS] DELETE response sent (status: %d)\n", ntohl(response.status));
             break;
         }
 
@@ -295,22 +319,255 @@ int ss_handle_ns_commands(int sock_fd, const char *base_path)
             response.type = htonl(MSG_HEARTBEAT);
             response.status = htonl(0);
             strcpy(response.message, "Alive");
+
+            // Send heartbeat response
+            if (send(sock_fd, &response, sizeof(ProtocolMessage), 0) < 0)
+            {
+                fprintf(stderr, "[SS] Failed to send HEARTBEAT response: %s\n", strerror(errno));
+                return -1;
+            }
             break;
 
+        case MSG_CREATE_FOLDER:
+        {
+            printf("[SS] Processing CREATEFOLDER command\n");
+
+            if (!client_manager || !client_manager->file_manager)
+            {
+                memset(&response, 0, sizeof(ProtocolMessage));
+                response.type = htonl(MSG_ERROR);
+                response.status = htonl(-1);
+                snprintf(response.message, sizeof(response.message),
+                         "ERROR: File manager not initialized");
+                send(sock_fd, &response, sizeof(ProtocolMessage), 0);
+                break;
+            }
+
+            // Parse data: "folderpath|username"
+            char folderpath[512];
+            char username[64];
+            if (sscanf(msg.data, "%511[^|]|%63s", folderpath, username) != 2)
+            {
+                memset(&response, 0, sizeof(ProtocolMessage));
+                response.type = htonl(MSG_ERROR);
+                response.status = htonl(-1);
+                snprintf(response.message, sizeof(response.message),
+                         "ERROR: Invalid CREATEFOLDER data format");
+                send(sock_fd, &response, sizeof(ProtocolMessage), 0);
+                break;
+            }
+
+            printf("[SS] Creating folder hierarchy: %s (owner: %s)\n", folderpath, username);
+
+            // **FIX: Clear response buffer before processing**
+            memset(&response, 0, sizeof(ProtocolMessage));
+
+            // Use FileManager's folder hierarchy system
+            int result = folder_create_hierarchy(client_manager->file_manager, folderpath, username);
+
+            if (result == 0)
+            {
+                response.type = htonl(MSG_FILE_OP_ACK);
+                response.status = htonl(0);
+                snprintf(response.message, sizeof(response.message),
+                         "SUCCESS: Folder '%s' created", folderpath);
+                printf("[SS] Folder created successfully: %s\n", folderpath);
+            }
+            else
+            {
+                response.type = htonl(MSG_ERROR);
+                response.status = htonl(-1);
+                snprintf(response.message, sizeof(response.message),
+                         "ERROR: Failed to create folder '%s'", folderpath);
+                fprintf(stderr, "[SS] Failed to create folder: %s\n", folderpath);
+            }
+
+            if (send(sock_fd, &response, sizeof(ProtocolMessage), 0) < 0)
+            {
+                perror("[SS] Failed to send folder create response");
+                return -1;
+            }
+
+            printf("[SS] CREATEFOLDER response sent (status: %d, msg: %.50s)\n",
+                   ntohl(response.status), response.message);
+            break;
+        }
+
+        case MSG_MOVE_FILE:
+        {
+            printf("[SS] Processing MOVE command\n");
+
+            if (!client_manager || !client_manager->file_manager)
+            {
+                memset(&response, 0, sizeof(ProtocolMessage));
+                response.type = htonl(MSG_ERROR);
+                response.status = htonl(-1);
+                snprintf(response.message, sizeof(response.message),
+                         "ERROR: File manager not initialized");
+                send(sock_fd, &response, sizeof(ProtocolMessage), 0);
+                break;
+            }
+
+            // Parse data: "filename|folderpath|username"
+            char filename[256];
+            char folderpath[512];
+            char username[64];
+            if (sscanf(msg.data, "%255[^|]|%511[^|]|%63s",
+                       filename, folderpath, username) != 3)
+            {
+                memset(&response, 0, sizeof(ProtocolMessage));
+                response.type = htonl(MSG_ERROR);
+                response.status = htonl(-1);
+                snprintf(response.message, sizeof(response.message),
+                         "ERROR: Invalid MOVE data format");
+                send(sock_fd, &response, sizeof(ProtocolMessage), 0);
+                break;
+            }
+
+            printf("[SS] Moving file '%s' to folder '%s'\n", filename, folderpath);
+
+            // **FIX: Clear response buffer before processing**
+            memset(&response, 0, sizeof(ProtocolMessage));
+
+            // Use FileManager's folder move function
+            int result = folder_move_file(client_manager->file_manager,
+                                          filename, folderpath, username);
+
+            if (result == 0)
+            {
+                response.type = htonl(MSG_FILE_OP_ACK);
+                response.status = htonl(0);
+                snprintf(response.message, sizeof(response.message),
+                         "SUCCESS: File '%s' moved to '%s'", filename, folderpath);
+                printf("[SS] File moved successfully\n");
+            }
+            else if (result == -2)
+            {
+                response.type = htonl(MSG_ERROR);
+                response.status = htonl(-2);
+                snprintf(response.message, sizeof(response.message),
+                         "ERROR: Access denied - only owner can move files");
+                fprintf(stderr, "[SS] Access denied for user '%s'\n", username);
+            }
+            else if (result == -3)
+            {
+                response.type = htonl(MSG_ERROR);
+                response.status = htonl(-3);
+                snprintf(response.message, sizeof(response.message),
+                         "ERROR: Destination folder '%s' not found", folderpath);
+                fprintf(stderr, "[SS] Folder not found: %s\n", folderpath);
+            }
+            else
+            {
+                response.type = htonl(MSG_ERROR);
+                response.status = htonl(-1);
+                snprintf(response.message, sizeof(response.message),
+                         "ERROR: Failed to move file");
+                fprintf(stderr, "[SS] Move operation failed\n");
+            }
+
+            if (send(sock_fd, &response, sizeof(ProtocolMessage), 0) < 0)
+            {
+                fprintf(stderr, "[SS] Failed to send MOVE response: %s\n", strerror(errno));
+                return -1;
+            }
+
+            printf("[SS] MOVE response sent (status: %d, msg: %.50s)\n",
+                   ntohl(response.status), response.message);
+            break;
+        }
+
+        case MSG_VIEW_FOLDER:
+        {
+            printf("[SS] Processing VIEWFOLDER command\n");
+
+            if (!client_manager || !client_manager->file_manager)
+            {
+                response.type = htonl(MSG_ERROR);
+                response.status = htonl(-1);
+                snprintf(response.message, sizeof(response.message),
+                         "ERROR: File manager not initialized");
+                send(sock_fd, &response, sizeof(ProtocolMessage), 0);
+                break;
+            }
+
+            // Parse data: "folderpath|username"
+            char folderpath[512];
+            char username[64];
+            if (sscanf(msg.data, "%511[^|]|%63s", folderpath, username) != 2)
+            {
+                response.type = htonl(MSG_ERROR);
+                response.status = htonl(-1);
+                snprintf(response.message, sizeof(response.message),
+                         "ERROR: Invalid VIEWFOLDER data format");
+                send(sock_fd, &response, sizeof(ProtocolMessage), 0);
+                break;
+            }
+
+            printf("[SS] Viewing folder: %s\n", folderpath);
+
+            // Use FileManager's folder list function
+            char folder_contents[MAX_BUFFER_SIZE];
+            memset(folder_contents, 0, sizeof(folder_contents)); // CLEAR BUFFER
+
+            char *result = folder_list_contents(client_manager->file_manager,
+                                                folderpath, folder_contents,
+                                                sizeof(folder_contents), username);
+
+            // CLEAR response structure completely
+            memset(&response, 0, sizeof(ProtocolMessage));
+            response.type = htonl(MSG_FILE_OP_ACK);
+
+            if (result)
+            {
+                // response.type = htonl(MSG_FILE_OP_ACK);
+                response.status = htonl(0);
+                strncpy(response.message, folder_contents, sizeof(response.message) - 1);
+                response.message[sizeof(response.message) - 1] = '\0';
+                // printf("[SS] Folder contents retrieved successfully\n");
+                printf("[SS] Folder contents retrieved successfully\n");
+                printf("[SS] Message length: %zu\n", strlen(response.message));
+                printf("[SS] First 100 chars: '%.100s'\n", response.message);
+            }
+            else
+            {
+                // response.type = htonl(MSG_ERROR);
+                response.status = htonl(-1);
+                snprintf(response.message, sizeof(response.message),
+                         "ERROR: Folder '%s' not found", folderpath);
+                fprintf(stderr, "[SS] Folder not found: %s\n", folderpath);
+            }
+
+            if (send(sock_fd, &response, sizeof(ProtocolMessage), 0) < 0)
+            {
+                fprintf(stderr, "[SS] Failed to send VIEWFOLDER response: %s\n", strerror(errno));
+                break;
+            }
+
+            printf("[SS] Folder contents sent (status: %d, msg_len: %zu)\n",
+                   ntohl(response.status), strlen(response.message));
+            break;
+        }
+
         default:
+            memset(&response, 0, sizeof(ProtocolMessage));
+            response.type = htonl(MSG_ERROR);
             response.status = htonl(-1);
             snprintf(response.message, MAX_BUFFER_SIZE,
                      "ERROR: Unknown command: %d", command_type);
             fprintf(stderr, "[SS] Unknown command: %d\n", command_type);
+
+            // Send error response for unknown commands
+            if (send(sock_fd, &response, sizeof(ProtocolMessage), 0) < 0)
+            {
+                fprintf(stderr, "[SS] Failed to send error response: %s\n", strerror(errno));
+                return -1;
+            }
+            break;
         }
 
-        if (ss_send_message(sock_fd, &response) < 0)
-        {
-            fprintf(stderr, "[SS] Failed to send response\n");
-            return -1;
-        }
-        
-        printf("[SS] Response sent (status: %d)\n", ntohl(response.status));
+        // Note: All case blocks handle their own response sending
+        // No need to send again here - it would cause duplicate sends!
     }
 
     return 0;

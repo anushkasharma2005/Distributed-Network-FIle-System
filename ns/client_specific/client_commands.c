@@ -68,6 +68,32 @@
     // For clarity, create file_path alias pointing to arg1
     const char* file_path = arg1;   
 
+    if (strcmp(command, "CREATEFOLDER") == 0) {
+        if (parsed < 2) {
+            send_message(client_fd, "ERROR: Usage: CREATEFOLDER <folderpath>");
+            return;
+        }
+        handle_createfolder_command(client_fd, arg1, username);
+        return;
+    }
+    
+    if (strcmp(command, "MOVE") == 0) {
+        if (parsed < 3) {
+            send_message(client_fd, "ERROR: Usage: MOVE <filename> <folderpath>");
+            return;
+        }
+        handle_move_command(client_fd, arg1, arg2, username);
+        return;
+    }
+    
+    if (strcmp(command, "VIEWFOLDER") == 0) {
+        if (parsed < 2) {
+            send_message(client_fd, "ERROR: Usage: VIEWFOLDER <folderpath>");
+            return;
+        }
+        handle_viewfolder_command(client_fd, arg1, username);
+        return;
+    }
     
     if (strcmp(command, "CREATE") == 0) {
 
@@ -682,4 +708,274 @@ void handle_view_command(int client_fd, const char* flags, const char* username)
     
     send_message(client_fd, response);
     printf("[NS-Client][VIEW] ✓ Sent %d files to client\n", file_count);
+}
+
+/**
+ * Handle CREATEFOLDER command
+ */
+void handle_createfolder_command(int client_fd, const char* folderpath, const char* username) {
+    printf("[NS-Client][CREATEFOLDER] User '%s' creating folder '%s'\n", username, folderpath);
+    
+    // Get all active storage servers
+    StorageServerInfo* ss_list[MAX_STORAGE_SERVERS];
+    int ss_count = get_all_active_storage_servers(ss_list, MAX_STORAGE_SERVERS);
+    
+    if (ss_count == 0) {
+        send_message(client_fd, "ERROR: No storage servers available");
+        return;
+    }
+    
+    int success_count = 0;
+    
+    // Broadcast to all storage servers
+    for (int i = 0; i < ss_count; i++) {
+        StorageServerInfo* ss = ss_list[i];
+        
+        pthread_mutex_lock(&ss->socket_mutex);
+        
+        ProtocolMessage msg;
+        memset(&msg, 0, sizeof(ProtocolMessage));
+        msg.type = htonl(MSG_CREATE_FOLDER);
+        msg.status = 0;
+        snprintf(msg.data, sizeof(msg.data), "%s|%s", folderpath, username);
+        
+        // Send request
+        if (!send_protocol_message(ss->ss_fd, &msg)) {
+            pthread_mutex_unlock(&ss->socket_mutex);
+            printf("[NS-Client][CREATEFOLDER] ✗ Failed to send to SS #%d\n", ss->ss_id);
+            continue;
+        }
+        
+        // **FIX: Use recv_protocol_message() instead of raw recv()**
+        ProtocolMessage ss_response;
+        if (!recv_protocol_message(ss->ss_fd, &ss_response)) {
+            pthread_mutex_unlock(&ss->socket_mutex);
+            printf("[NS-Client][CREATEFOLDER] ✗ Failed to receive response from SS #%d\n", ss->ss_id);
+            continue;
+        }
+        
+        pthread_mutex_unlock(&ss->socket_mutex);
+        
+        // **FIX: Check response status correctly**
+        int response_status = ntohl(ss_response.status);
+        
+        if (response_status == 0) {
+            success_count++;
+            printf("[NS-Client][CREATEFOLDER] ✓ Created on SS #%d\n", ss->ss_id);
+        } else {
+            printf("[NS-Client][CREATEFOLDER] ✗ Failed on SS #%d (status: %d, msg: %s)\n", 
+                   ss->ss_id, response_status, ss_response.message);
+        }
+    }
+    
+    if (success_count > 0) {
+        char response[256];
+        snprintf(response, sizeof(response), 
+                "SUCCESS: Folder '%s' created on %d storage server(s)", 
+                folderpath, success_count);
+        send_message(client_fd, response);
+        printf("[NS-Client][CREATEFOLDER] ✓ Folder created on %d/%d servers\n", success_count, ss_count);
+    } else {
+        send_message(client_fd, "ERROR: Failed to create folder on any storage server");
+    }
+}
+
+/**
+ * Handle MOVE command
+ */
+void handle_move_command(int client_fd, const char* filename, 
+                         const char* folderpath, const char* username) {
+    printf("[NS-Client][MOVE] User '%s' moving '%s' to '%s'\n", 
+           username, filename, folderpath);
+    
+    // Find file in registry
+    FileInfo* file = find_file(filename);
+    if (!file) {
+        send_message(client_fd, "ERROR: File not found");
+        printf("[NS-Client][MOVE] ✗ File '%s' not found\n", filename);
+        return;
+    }
+    
+    if (!file->is_active) {
+        send_message(client_fd, "ERROR: File is not currently available");
+        printf("[NS-Client][MOVE] ✗ File '%s' is inactive\n", filename);
+        return;
+    }
+    
+    // Check ownership
+    if (!is_file_owner(filename, username)) {
+        send_message(client_fd, "ERROR: Only file owner can move files");
+        printf("[NS-Client][MOVE] ✗ Access denied for user '%s'\n", username);
+        return;
+    }
+    
+    // Get SS info
+    StorageServerInfo* ss = find_storage_server_by_address(file->ss_ip, file->ss_nm_port);
+    if (!ss || !ss->is_active) {
+        send_message(client_fd, "ERROR: Storage server not available");
+        printf("[NS-Client][MOVE] ✗ SS not available for file '%s'\n", filename);
+        return;
+    }
+    
+    // Send MOVE request to SS
+    pthread_mutex_lock(&ss->socket_mutex);
+    
+    ProtocolMessage msg;
+    memset(&msg, 0, sizeof(ProtocolMessage));
+    msg.type = htonl(MSG_MOVE_FILE);
+    msg.status = 0;
+    snprintf(msg.data, sizeof(msg.data), "%s|%s|%s", filename, folderpath, username);
+    
+    if (!send_protocol_message(ss->ss_fd, &msg)) {
+        pthread_mutex_unlock(&ss->socket_mutex);
+        send_message(client_fd, "ERROR: Failed to communicate with storage server");
+        return;
+    }
+    
+    // Wait for response
+    ProtocolMessage response;
+    memset(&response, 0, sizeof(ProtocolMessage));
+    
+    if (!recv_protocol_message(ss->ss_fd, &response)) {
+        pthread_mutex_unlock(&ss->socket_mutex);
+        mark_ss_inactive(ss->ip_address, ss->nm_port);
+        const char* error = "ERROR: Failed to receive response from storage server";
+        send_message(client_fd, error);
+        printf("[NS-Client][MOVE] ✗ Failed to recv from SS\n");
+        return;
+    }
+    
+    pthread_mutex_unlock(&ss->socket_mutex);
+
+    int response_status = ntohl(response.status);
+    
+    if (response_status == 0) {
+        char reply[256];
+        snprintf(reply, sizeof(reply), 
+                "SUCCESS: File '%s' moved to folder '%s'", filename, folderpath);
+        send_message(client_fd, reply);
+        printf("[NS-Client][MOVE] ✓ File moved successfully\n");
+    } else {
+        // Send error from SS
+        if (strlen(response.message) > 0) {
+            send_message(client_fd, response.message);
+        } else {
+            const char* error = "ERROR: Failed to move file";
+            send_message(client_fd, error);
+        }
+        printf("[NS-Client][MOVE] ✗ Move failed: %s\n", response.message);
+    }
+}
+
+/**
+ * Handle VIEWFOLDER command
+ */
+void handle_viewfolder_command(int client_fd, const char* folderpath, const char* username) {
+    printf("[NS-Client][VIEWFOLDER] User '%s' viewing folder '%s'\n", username, folderpath);
+    
+    char full_folderpath[512];
+    if (strncmp(folderpath, "root/", 5) == 0 || strcmp(folderpath, "root") == 0) {
+        // Already has root prefix
+        strncpy(full_folderpath, folderpath, sizeof(full_folderpath) - 1);
+    } else {
+        // Add root prefix
+        snprintf(full_folderpath, sizeof(full_folderpath), "root/%s", folderpath);
+    }
+    full_folderpath[sizeof(full_folderpath) - 1] = '\0';
+    
+    printf("[NS-Client][VIEWFOLDER] Full path: '%s'\n", full_folderpath);
+    
+    // Get any active SS (they all have same folder structure)
+    StorageServerInfo* ss = select_ss_for_file();
+    if (!ss) {
+        send_message(client_fd, "ERROR: No storage servers available");
+        printf("[NS-Client][VIEWFOLDER] ✗ No storage servers available\n");
+        return;
+    }
+    
+    // Send VIEWFOLDER request to SS
+    pthread_mutex_lock(&ss->socket_mutex);
+    
+    ProtocolMessage msg;
+    memset(&msg, 0, sizeof(ProtocolMessage));
+    msg.type = htonl(MSG_VIEW_FOLDER);
+    msg.status = 0;
+    snprintf(msg.data, sizeof(msg.data), "%s|%s", full_folderpath, username);
+    
+    // snprintf(msg.data, sizeof(msg.data), "%s|%s", folderpath, username);
+    
+    if (!send_protocol_message(ss->ss_fd, &msg)) {
+        pthread_mutex_unlock(&ss->socket_mutex);
+        const char* error = "ERROR: Failed to communicate with storage server";
+        send_message(client_fd, error);
+        printf("[NS-Client][VIEWFOLDER] ✗ Failed to send to SS\n");
+        return;
+    }
+    
+    // Wait for response
+    ProtocolMessage response;
+    memset(&response, 0, sizeof(ProtocolMessage));
+
+    // ssize_t received = recv(ss->ss_fd, &response, sizeof(ProtocolMessage), 0);
+    if (!recv_protocol_message(ss->ss_fd, &response)) {
+        pthread_mutex_unlock(&ss->socket_mutex);
+        const char* error = "ERROR: Failed to receive response from storage server";
+        send_message(client_fd, error);
+        printf("[NS-Client][VIEWFOLDER] ✗ Failed to recv from SS\n");
+        return;
+    }
+    
+    pthread_mutex_unlock(&ss->socket_mutex);
+    
+    // if (received == 0) {
+    //     printf("[NS-Client][VIEWFOLDER] SS #%d disconnected\n", ss->ss_id);
+    //     mark_ss_inactive(ss->ip_address, ss->nm_port);
+    //     send_message(client_fd, "ERROR: Storage server disconnected");
+    //     return;
+    // }
+    
+    // if (received != sizeof(ProtocolMessage)) {
+    //     const char* error = "ERROR: Invalid response from storage server";
+    //     send_message(client_fd, error);
+    //     printf("[NS-Client][VIEWFOLDER] ✗ Invalid response size: %zd (expected %zu)\n", 
+    //            received, sizeof(ProtocolMessage));
+    //     return;
+    // }
+    
+    int response_status = ntohl(response.status);
+
+    // DEBUG: Print what we received
+    printf("[NS-Client][VIEWFOLDER] Received from SS:\n");
+    printf("  - status (after ntohl): %d\n", response_status);
+    printf("  - message length: %zu\n", strlen(response.message));
+    printf("  - message (first 100 chars): '%.100s'\n", response.message);
+    printf("  - message (hex first 32 bytes): ");
+    for (int i = 0; i < 32 && i < (int)sizeof(response.message); i++) {
+        printf("%02x ", (unsigned char)response.message[i]);
+    }
+    printf("\n");
+
+    if (response_status == 0) {
+        // Check if message is actually empty or garbage
+        if (strlen(response.message) == 0) {
+            const char* empty = "ERROR: Empty response from storage server";
+            send_message(client_fd, empty);
+            printf("[NS-Client][VIEWFOLDER] ✗ Empty message from SS\n");
+        } else {
+            // Send the actual message content
+            send_message(client_fd, response.message);
+            printf("[NS-Client][VIEWFOLDER] ✓ Sent folder contents (%zu bytes)\n", 
+                   strlen(response.message));
+        }
+    } else {
+        // Error - send error message
+        if (strlen(response.message) > 0) {
+            send_message(client_fd, response.message);
+        } else {
+            const char* error = "ERROR: Failed to view folder";
+            send_message(client_fd, error);
+        }
+        printf("[NS-Client][VIEWFOLDER] ✗ Error status %d: %s\n", 
+               response_status, response.message);
+    }
 }

@@ -1,4 +1,3 @@
-#include "networking.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -7,6 +6,8 @@
 #include <fcntl.h>
 #include <arpa/inet.h>
 #include <sys/time.h>
+#include "../api_c_ns/networking.h"  // For basic socket functions
+#include "../api_ns_ss/ns_ss_connection.h"
 
 
 // Thread-local storage for error messages
@@ -71,31 +72,74 @@ int send_data(int socket_fd, const void *data, size_t len) {
     return total_sent;
 }
 
+// int recv_data(int socket_fd, void *buffer, size_t len) {
+//     if (buffer == NULL || len == 0) {
+//         snprintf(error_buffer, sizeof(error_buffer), "Invalid buffer or length");
+//         return NET_ERROR;
+//     }
+    
+//     ssize_t received = recv(socket_fd, buffer, len, 0);
+    
+//     if (received < 0) {
+//         if (errno == EINTR) {
+//             return 0; // Interrupted, can retry
+//         }
+//         if (errno == EAGAIN || errno == EWOULDBLOCK) {
+//             return NET_TIMEOUT;
+//         }
+//         snprintf(error_buffer, sizeof(error_buffer), 
+//                 "Failed to receive data: %s", strerror(errno));
+//         return NET_ERROR;
+//     }
+    
+//     if (received == 0) {
+//         return NET_CLOSED;
+//     }
+    
+//     return received;
+// }
+
 int recv_data(int socket_fd, void *buffer, size_t len) {
     if (buffer == NULL || len == 0) {
         snprintf(error_buffer, sizeof(error_buffer), "Invalid buffer or length");
         return NET_ERROR;
     }
     
-    ssize_t received = recv(socket_fd, buffer, len, 0);
+    size_t total_received = 0;
+    char *ptr = (char *)buffer;
     
-    if (received < 0) {
-        if (errno == EINTR) {
-            return 0; // Interrupted, can retry
+    while (total_received < len) {
+        ssize_t received = recv(socket_fd, ptr + total_received, 
+                               len - total_received, 0);
+        
+        if (received < 0) {
+            if (errno == EINTR) {
+                continue; // Interrupted, retry
+            }
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                return NET_TIMEOUT;
+            }
+            snprintf(error_buffer, sizeof(error_buffer), 
+                    "Failed to receive data: %s", strerror(errno));
+            return NET_ERROR;
         }
-        if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            return NET_TIMEOUT;
+        
+        if (received == 0) {
+            // Connection closed - but only return error if we haven't received anything yet
+            if (total_received == 0) {
+                return NET_CLOSED;
+            }
+            // If we received partial data before close, that's still an error
+            snprintf(error_buffer, sizeof(error_buffer), 
+                    "Connection closed after receiving %zu of %zu bytes", 
+                    total_received, len);
+            return NET_ERROR;
         }
-        snprintf(error_buffer, sizeof(error_buffer), 
-                "Failed to receive data: %s", strerror(errno));
-        return NET_ERROR;
+        
+        total_received += received;
     }
     
-    if (received == 0) {
-        return NET_CLOSED;
-    }
-    
-    return received;
+    return total_received;
 }
 
 int send_message(int socket_fd, const char *message) {
@@ -249,12 +293,43 @@ bool send_protocol_message(int fd, const ProtocolMessage* msg) {
 /**
  * Receive binary protocol message
  */
+// bool recv_protocol_message(int fd, ProtocolMessage* msg) {
+//     memset(msg, 0, sizeof(ProtocolMessage));
+//     ssize_t received = recv(fd, msg, sizeof(ProtocolMessage), MSG_WAITALL);
+//     if (received != sizeof(ProtocolMessage)) {
+//         printf("[ERROR][Networking] Failed to receive protocol message: got %zd of %zu bytes\n", 
+//                received, sizeof(ProtocolMessage));
+//         return false;
+//     }
+
+//     // DEBUG: Print what we actually received
+//     printf("[DEBUG][Networking] Received ProtocolMessage:\n");
+//     printf("  - Bytes: %zd\n", received);
+//     printf("  - msg.type (raw): %d\n", msg->type);
+//     printf("  - msg.status (raw): %d\n", msg->status);
+//     printf("  - msg.message length: %zu\n", strlen(msg->message));
+//     printf("  - msg.message (first 50): '%.50s'\n", msg->message);
+    
+//     return true;
+// }
+
 bool recv_protocol_message(int fd, ProtocolMessage* msg) {
-    ssize_t received = recv(fd, msg, sizeof(ProtocolMessage), 0);
+    memset(msg, 0, sizeof(ProtocolMessage));
+    
+    printf("[DEBUG][recv_protocol_message] About to recv from fd=%d\n", fd);
+    
+    ssize_t received = recv(fd, msg, sizeof(ProtocolMessage), MSG_WAITALL);
+    
+    printf("[DEBUG][recv_protocol_message] Received %zd bytes from fd=%d\n", received, fd);
+    printf("[DEBUG][recv_protocol_message] msg.type (raw): %u, msg.status (raw): %u\n",
+           msg->type, msg->status);
+    printf("[DEBUG][recv_protocol_message] msg.message: '%.50s'\n", msg->message);
+    
     if (received != sizeof(ProtocolMessage)) {
         printf("[ERROR][Networking] Failed to receive protocol message: got %zd of %zu bytes\n", 
                received, sizeof(ProtocolMessage));
         return false;
     }
+    
     return true;
 }

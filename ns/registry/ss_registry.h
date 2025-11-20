@@ -106,4 +106,6 @@ void mark_ss_inactive(const char* ip_address, int nm_port);
  */
 void cleanup_ss_registry();
 
+int get_all_active_storage_servers(StorageServerInfo** ss_list, int max_count);
+
 #endif // SS_REGISTRY_H

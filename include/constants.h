@@ -105,4 +105,13 @@
 
 #define MAX_ACCESS_USERS 50  // Max users with access to a file
 
+#define MAX_FOLDERS 1000
+#define MAX_FOLDER_NAME 256
+#define MAX_PATH_LENGTH 512
+
+#define MAX_WORD_LENGTH 256
+#define MAX_FILENAME 256
+#define MAX_WHITESPACE 64  // Max whitespace to preserve after each word
+
+
 #endif // PROJECT_CONSTANTS_H

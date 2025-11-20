@@ -289,7 +289,7 @@ int ss_handle_undo(int client_fd, ClientRequest *request, ClientManager *manager
 // ==================== Client Handler Thread ====================
 
 void *ss_client_handler(void *arg) {
-    ClientThreadData *thread_data = (ClientThreadData *)arg;
+    SSClientThreadData *thread_data = (SSClientThreadData *)arg;
     ClientRequest request;
     ClientManager *manager = thread_data->manager;
     

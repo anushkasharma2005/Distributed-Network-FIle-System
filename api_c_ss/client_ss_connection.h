@@ -71,12 +71,12 @@ typedef struct
     int active;
     WriteSession *write_session;
     ClientManager *manager;  // Now ClientManager is forward-declared
-} ClientThreadData;
+} SSClientThreadData;
 
 // Structure for managing multiple client connections
 struct ClientManager  // Changed from typedef to struct definition
 {
-    ClientThreadData clients[MAX_CLIENTS];
+    SSClientThreadData clients[MAX_CLIENTS];
     int client_count;
     pthread_mutex_t lock;
     char base_path[MAX_FILENAME];

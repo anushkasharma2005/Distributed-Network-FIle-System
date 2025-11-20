@@ -212,8 +212,30 @@ int ss_handle_write_begin(int client_fd, ClientRequest *request, ClientManager *
     // Copy main file to temp file
     char main_path[MAX_FILENAME * 2];
     char temp_path[MAX_FILENAME * 2];
-    snprintf(main_path, sizeof(main_path), "%s/%s", manager->base_path, fs->filename);
-    snprintf(temp_path, sizeof(temp_path), "%s/%s", manager->base_path, fs->temp_filename);
+    // snprintf(main_path, sizeof(main_path), "%s/%s", manager->base_path, fs->filename);
+    // snprintf(temp_path, sizeof(temp_path), "%s/%s", manager->base_path, fs->temp_filename);
+    
+    if (strlen(fs->folder_path) == 0 || strcmp(fs->folder_path, "") == 0) {
+        // Shouldn't happen after fs_create fix, but handle it
+        snprintf(main_path, sizeof(main_path), "%s/root/%s", 
+                 manager->base_path, fs->filename);
+        snprintf(temp_path, sizeof(temp_path), "%s/root/%s", 
+                 manager->base_path, fs->temp_filename);
+    } else if (strcmp(fs->folder_path, "root") == 0) {
+        snprintf(main_path, sizeof(main_path), "%s/root/%s", 
+                 manager->base_path, fs->filename);
+        snprintf(temp_path, sizeof(temp_path), "%s/root/%s", 
+                 manager->base_path, fs->temp_filename);
+    } else {
+        // File in subfolder
+        snprintf(main_path, sizeof(main_path), "%s/%s/%s", 
+                 manager->base_path, fs->folder_path, fs->filename);
+        snprintf(temp_path, sizeof(temp_path), "%s/%s/%s", 
+                 manager->base_path, fs->folder_path, fs->temp_filename);
+    }
+
+    printf("[SS-WRITE] Main file path: %s\n", main_path);
+    printf("[SS-WRITE] Temp file path: %s\n", temp_path);
 
     // Copy file (or create empty if doesn't exist)
     FILE *src = fopen(main_path, "r");
@@ -255,7 +277,7 @@ int ss_handle_write_begin(int client_fd, ClientRequest *request, ClientManager *
         unlink(temp_path);
         return -1;
     }
-
+    strcpy(temp_fs->folder_path, fs->folder_path);
     fs_load_from_disk(temp_fs, manager->base_path);
 
     // Lock the sentence in temp structure
@@ -739,6 +761,25 @@ int ss_handle_write_end(int client_fd, ClientRequest *request, ClientManager *ma
         ss_send_to_client(client_fd, &response);
         ss_destroy_write_session(manager, client_fd);
         return -1;
+    }
+
+    char temp_path[MAX_FILENAME * 2];
+    
+    if (strlen(fs->folder_path) == 0 || strcmp(fs->folder_path, "") == 0) {
+        snprintf(temp_path, sizeof(temp_path), "%s/root/%s", 
+                 manager->base_path, fs->temp_filename);
+    } else if (strcmp(fs->folder_path, "root") == 0) {
+        snprintf(temp_path, sizeof(temp_path), "%s/root/%s", 
+                 manager->base_path, fs->temp_filename);
+    } else {
+        snprintf(temp_path, sizeof(temp_path), "%s/%s/%s", 
+                 manager->base_path, fs->folder_path, fs->temp_filename);
+    }
+
+    printf("[SS-WRITE] Deleting temp file: %s\n", temp_path);
+    if (unlink(temp_path) != 0) {
+        fprintf(stderr, "[SS-WRITE] Warning: Failed to delete temp file %s: %s\n", 
+                temp_path, strerror(errno));
     }
 
     // Clear write lock

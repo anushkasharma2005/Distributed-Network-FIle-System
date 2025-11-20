@@ -278,6 +278,44 @@ int parse_command(const char *input, Command *cmd) {
         return SUCCESS;
     }
 
+    if (strcmp(command, "CREATEFOLDER") == 0) {
+        cmd->type = MSG_CREATEFOLDER;
+        token = strtok(NULL, " \t");
+        if (!token) {
+            return ERR_INVALID_COMMAND;
+        }
+        strncpy(cmd->filename, token, MAX_FILENAME_LENGTH - 1); // Reusing filename field for folder path
+        return SUCCESS;
+    }
+
+    // Parse MOVE command
+    if (strcmp(command, "MOVE") == 0) {
+        cmd->type = MSG_MOVE;
+        token = strtok(NULL, " \t");
+        if (!token) {
+            return ERR_INVALID_COMMAND;
+        }
+        strncpy(cmd->filename, token, MAX_FILENAME_LENGTH - 1);
+        
+        token = strtok(NULL, " \t");
+        if (!token) {
+            return ERR_INVALID_COMMAND;
+        }
+        strncpy(cmd->content, token, sizeof(cmd->content) - 1); // Reusing content field for dest folder
+        return SUCCESS;
+    }
+
+    // Parse VIEWFOLDER command
+    if (strcmp(command, "VIEWFOLDER") == 0) {
+        cmd->type = MSG_VIEWFOLDER;
+        token = strtok(NULL, " \t");
+        if (!token) {
+            return ERR_INVALID_COMMAND;
+        }
+        strncpy(cmd->filename, token, MAX_FILENAME_LENGTH - 1);
+        return SUCCESS;
+    }
+
     return ERR_INVALID_COMMAND;
 }
 
