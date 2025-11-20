@@ -3,7 +3,8 @@
 #include "ss_specific/handle_ss.h"
 #include "registry/ss_registry.h"
 #include "registry/file_registry.h" 
-#include "registry/user_registry.h" 
+#include "registry/user_registry.h"
+#include "registry/cache.h" 
 #include "../include/constants.h"
 #include <stdio.h>
 
@@ -23,12 +24,16 @@ int main() {
     // Wait for shutdown signal. If signal received, running flag will be set to 0 and acceptance threads will exit their loops  and we'll proceed to cleanup
 
 
+    // Print cache statistics BEFORE cleanup
+    print_cache_stats();
+
     // Cleanup
     printf("\n[NS] Initiating shutdown sequence...\n");
     // Cleanup registry
     cleanup_ss_registry();
     cleanup_file_registry();
     cleanup_user_registry();
+    cleanup_cache();
 
     // Shutdown servers by closing their sockets. 
     shutdown_main_server(fds);

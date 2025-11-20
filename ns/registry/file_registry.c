@@ -7,6 +7,7 @@
 #include "ss_registry.h"
 #include "../../api_ns_ss/ns_ss_connection.h"
 #include "../../api_c_ns/networking.h"
+#include "cache.h"
 
 
 // Global file registry
@@ -115,6 +116,11 @@ int register_file(const char* file_path, int ss_id, const char* ss_ip, int ss_cl
     
     pthread_mutex_unlock(&file_registry.mutex);
     
+
+    // Invalidate cache (new file registered)
+    cache_invalidate_file(file_path);
+
+
     printf("[File-Registry] ✓ Registered file '%s' on SS #%d at bucket %u (Total: %d)\n",
            file_path, ss_id, index, file_registry.count);
     
@@ -127,6 +133,18 @@ int register_file(const char* file_path, int ss_id, const char* ss_ip, int ss_cl
 FileInfo* find_file(const char* file_path) {
     if (!file_path) return NULL;
     
+
+    // TRY CACHE FIRST
+    FileInfo* cached = cache_get_file(file_path);
+    if (cached) {
+        // Update last accessed time even for cached lookups
+        pthread_mutex_lock(&file_registry.mutex);
+        cached->last_accessed = time(NULL);
+        pthread_mutex_unlock(&file_registry.mutex);
+        return cached;
+    }
+
+    // CACHE MISS - do actual search
     pthread_mutex_lock(&file_registry.mutex);
     
     unsigned int index = hash_file_path(file_path);
@@ -137,6 +155,10 @@ FileInfo* find_file(const char* file_path) {
             FileInfo* result = current->value;
             result->last_accessed = time(NULL);
             pthread_mutex_unlock(&file_registry.mutex);
+            
+            // STORE IN CACHE for next time
+            cache_put_file(file_path, result);
+
             return result;
         }
         current = current->next;
@@ -188,6 +210,9 @@ int unregister_file(const char* file_path) {
             
             pthread_mutex_unlock(&file_registry.mutex);
             
+            // Invalidate cache
+            cache_invalidate_file(file_path);
+
             printf("[File-Registry] Unregistered file '%s' (Total: %d)\n",
                    file_path, file_registry.count);
             
@@ -682,6 +707,9 @@ int soft_delete_file(const char* file_path) {
     file->deleted_at = time(NULL);
     
     pthread_mutex_unlock(&file_registry.mutex);
+
+    // Invalidate cache
+    cache_invalidate_file(file_path);
     
     printf("[File-Registry] ✓ Soft deleted '%s' (can restore within %d minutes)\n",
            file_path, DELETE_EXPIRY_MINUTES);
@@ -718,6 +746,9 @@ int restore_file(const char* file_path) {
     file->deleted_at = 0;
     
     pthread_mutex_unlock(&file_registry.mutex);
+    
+    // Invalidate cache
+    cache_invalidate_file(file_path);
     
     printf("[File-Registry] ✓ Restored file '%s'\n", file_path);
     
