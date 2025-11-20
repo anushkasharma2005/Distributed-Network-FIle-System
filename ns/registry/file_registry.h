@@ -16,8 +16,9 @@ typedef struct FileInfo {
     char ss_ip[16];                 // SS IP address
     int ss_client_port;             // SS client port
     int ss_nm_port;                 // SS NM port, to look up for the ss
-    time_t created_at;              // When file was created
+    time_t created_at;              // When file was created (this never chnages)
     time_t last_accessed;           // Last access time
+    time_t last_modified;           // Updates on writes
     char* owner;                    // Owner ID
     bool is_active;                 // Is file still available?
 
@@ -31,6 +32,7 @@ typedef struct FileInfo {
 
     int word_count;      // -1 means N/A
     int char_count;      // -1 means N/A
+    long file_size;      // -1 means N/A
 
 } FileInfo;
 
@@ -175,5 +177,13 @@ int format_access_list(FileInfo* file_info, char* buffer, size_t buffer_size);
  * @return Number of files
  */
 int get_accessible_files(const char* username, FileInfo** files, int max_size, bool include_all);
+
+/**
+ * Update file metadata from Storage Server
+ * Fetches fresh word_count, char_count, and file_size from SS
+ * @param file_path File path
+ * @return 0 on success, -1 on error
+ */
+int update_file_metadata(const char* file_path);
 
 #endif // FILE_REGISTRY_H

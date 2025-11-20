@@ -36,6 +36,7 @@ typedef enum
     MSG_READ_FILE,
     MSG_COPY_FILE,
     MSG_INFO_FILE,
+    MSG_GET_METADATA = 23,
 } MessageType;
 
 // Structure for file information

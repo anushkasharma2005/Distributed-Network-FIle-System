@@ -549,6 +549,107 @@ int ss_handle_ns_commands(int sock_fd, const char *base_path, ClientManager *cli
             break;
         }
 
+        case MSG_GET_METADATA:
+        {
+            printf("[SS] Processing GET_METADATA command\n");
+
+            if (!client_manager || !client_manager->file_manager)
+            {
+                memset(&response, 0, sizeof(ProtocolMessage));
+                response.type = htonl(MSG_ERROR);
+                response.status = htonl(-1);
+                snprintf(response.message, sizeof(response.message),
+                         "ERROR: File manager not initialized");
+                send(sock_fd, &response, sizeof(ProtocolMessage), 0);
+                break;
+            }
+
+            // Parse filename from msg.data
+            char filename[512];
+            strncpy(filename, msg.data, sizeof(filename) - 1);
+            filename[sizeof(filename) - 1] = '\0';
+
+            printf("[SS] Getting metadata for: %s\n", filename);
+
+            // Get file structure
+            FileStructure *fs = fm_get_file(client_manager->file_manager, filename);
+
+            memset(&response, 0, sizeof(ProtocolMessage));
+            response.type = htonl(MSG_FILE_OP_ACK);
+
+            if (!fs)
+            {
+                response.status = htonl(-1);
+                snprintf(response.message, sizeof(response.message),
+                         "ERROR: File not found");
+                printf("[SS] File not found: %s\n", filename);
+            }
+            else
+            {
+                // Calculate metadata by traversing the file structure
+                long file_size = 0;
+                int word_count = 0;
+                int char_count = 0;
+
+                pthread_rwlock_rdlock(&fs->file_lock);
+
+                SentenceNode *sentence = fs->sentences;
+                while (sentence)
+                {
+                    pthread_rwlock_rdlock(&sentence->lock);
+
+                    // Count words in this sentence
+                    WordNode *word = sentence->words;
+                    while (word)
+                    {
+                        word_count++;
+
+                        // Count characters in word
+                        int word_len = strlen(word->word);
+                        char_count += word_len;
+                        file_size += word_len;
+
+                        // Count whitespace after word
+                        int ws_len = strlen(word->whitespace_after);
+                        char_count += ws_len;
+                        file_size += ws_len;
+
+                        word = word->next;
+                    }
+
+                    // Count delimiters (., !, ?, etc.)
+                    int delim_len = strlen(sentence->delimiters);
+                    char_count += delim_len;
+                    file_size += delim_len;
+                    // Count whitespace after delimiters
+                    int ws_delim_len = strlen(sentence->whitespace_after_delimiters);
+                    char_count += ws_delim_len;
+                    file_size += ws_delim_len;
+
+                    pthread_rwlock_unlock(&sentence->lock);
+                    sentence = sentence->next;
+                }
+
+                pthread_rwlock_unlock(&fs->file_lock);
+
+                response.status = htonl(0);
+                snprintf(response.message, sizeof(response.message),
+                         "%ld|%d|%d", file_size, word_count, char_count);
+
+                printf("[SS] Metadata calculated: size=%ld, words=%d, chars=%d\n",
+                       file_size, word_count, char_count);
+            }
+
+            if (send(sock_fd, &response, sizeof(ProtocolMessage), 0) < 0)
+            {
+                fprintf(stderr, "[SS] Failed to send METADATA response: %s\n", strerror(errno));
+                return -1;
+            }
+
+            printf("[SS] METADATA response sent (status: %d)\n", ntohl(response.status));
+            break;
+        }
+
         default:
             memset(&response, 0, sizeof(ProtocolMessage));
             response.type = htonl(MSG_ERROR);

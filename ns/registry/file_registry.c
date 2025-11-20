@@ -1,4 +1,6 @@
 #include "file_registry.h"
+#include "../registry/ss_registry.h"
+#include "../../api_ns_ss/ns_ss_connection.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -75,6 +77,7 @@ int register_file(const char* file_path, int ss_id, const char* ss_ip, int ss_cl
     new_node->value->ss_client_port = ss_client_port;
     new_node->value->created_at = time(NULL);
     new_node->value->last_accessed = time(NULL);
+    new_node->value->last_modified = time(NULL);
     new_node->value->is_active = true;
     new_node->value->ss_nm_port = ss_nm_port;
     new_node->value->owner = strdup(owner);
@@ -99,6 +102,7 @@ int register_file(const char* file_path, int ss_id, const char* ss_ip, int ss_cl
     new_node->value->write_capacity = MAX_ACCESS_USERS;
     new_node->value->word_count = -1;
     new_node->value->char_count = -1;
+    new_node->value->file_size = -1;
     
     
     // Insert at head
@@ -129,6 +133,12 @@ FileInfo* find_file(const char* file_path) {
     while (current != NULL) {
         if (strcmp(current->key, file_path) == 0) {
             FileInfo* result = current->value;
+            // DEBUG: Print created_at BEFORE updating last_accessed
+            printf("[DEBUG][find_file] File '%s' found:\n", file_path);
+            printf("  - created_at: %ld\n", result->created_at);
+            printf("  - last_accessed (before): %ld\n", result->last_accessed);
+            printf("  - last_modified: %ld\n", result->last_modified);
+            
             result->last_accessed = time(NULL);
             pthread_mutex_unlock(&file_registry.mutex);
             return result;
@@ -650,4 +660,74 @@ int get_accessible_files(const char* username, FileInfo** files, int max_size, b
         //    count, total_active, include_all);
     
     return count;
+}
+
+/**
+ * Update file metadata from Storage Server
+ */
+int update_file_metadata(const char* file_path) {
+    FileInfo* file = find_file(file_path);
+    if (!file || !file->is_active) {
+        fprintf(stderr, "[File-Registry] Cannot update metadata: file not found or inactive\n");
+        return -1;
+    }
+    
+    // Find the SS storing this file
+    StorageServerInfo* ss = find_storage_server_by_address(file->ss_ip, file->ss_nm_port);
+    if (!ss || !ss->is_active) {
+        fprintf(stderr, "[File-Registry] Cannot update metadata: SS not available\n");
+        return -1;
+    }
+    
+    // Send METADATA request to SS
+    pthread_mutex_lock(&ss->socket_mutex);
+    
+    ProtocolMessage msg;
+    memset(&msg, 0, sizeof(ProtocolMessage));
+    msg.type = htonl(MSG_GET_METADATA);
+    msg.status = 0;
+    strncpy(msg.data, file_path, sizeof(msg.data) - 1);
+    
+    if (!send_protocol_message(ss->ss_fd, &msg)) {
+        pthread_mutex_unlock(&ss->socket_mutex);
+        fprintf(stderr, "[File-Registry] Failed to send metadata request\n");
+        return -1;
+    }
+    
+    // Receive metadata response
+    ProtocolMessage response;
+    memset(&response, 0, sizeof(ProtocolMessage));
+    
+    if (!recv_protocol_message(ss->ss_fd, &response)) {
+        pthread_mutex_unlock(&ss->socket_mutex);
+        fprintf(stderr, "[File-Registry] Failed to receive metadata response\n");
+        return -1;
+    }
+    
+    pthread_mutex_unlock(&ss->socket_mutex);
+    
+    // Parse response: "size|word_count|char_count"
+    if (ntohl(response.status) == 0) {
+        long size;
+        int words, chars;
+        if (sscanf(response.message, "%ld|%d|%d", &size, &words, &chars) == 3) {
+            // Update file info
+            pthread_mutex_lock(&file_registry.mutex);
+            file->word_count = words;
+            file->char_count = chars;
+            file->file_size = size;
+            // file->last_modified = time(NULL);
+            pthread_mutex_unlock(&file_registry.mutex);
+            
+            printf("[File-Registry] ✓ Updated metadata for '%s': %ld bytes, %d words, %d chars\n",
+                   file_path, size, words, chars);
+            return 0;
+        } else {
+            fprintf(stderr, "[File-Registry] Failed to parse metadata response: %s\n", response.message);
+        }
+    } else {
+        fprintf(stderr, "[File-Registry] SS returned error: %s\n", response.message);
+    }
+    
+    return -1;
 }

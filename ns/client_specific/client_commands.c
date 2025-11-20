@@ -414,6 +414,7 @@ void handle_write_command(int client_fd, const char* file_path) {
     
     // 4. Update last accessed time
     file_info->last_accessed = time(NULL);
+    file_info->last_modified = time(NULL);
 }
 
 
@@ -436,35 +437,81 @@ void handle_info_command(int client_fd, const char* file_path) {
         printf("[NS-Client][INFO] ✗ File '%s' is inactive\n", file_path);
         return;
     }
+
+    // DEBUG: Print timestamps BEFORE formatting
+    printf("[DEBUG][INFO] Timestamps for '%s':\n", file_path);
+    printf("  - created_at (raw): %ld\n", file_info->created_at);
+    printf("  - last_accessed (raw): %ld\n", file_info->last_accessed);
+    printf("  - last_modified (raw): %ld\n", file_info->last_modified);
+
+    update_file_metadata(file_path);
+
+    // DEBUG: Print timestamps AFTER update_file_metadata
+    printf("[DEBUG][INFO] Timestamps AFTER metadata update:\n");
+    printf("  - created_at (raw): %ld\n", file_info->created_at);
+    printf("  - last_accessed (raw): %ld\n", file_info->last_accessed);
+    printf("  - last_modified (raw): %ld\n", file_info->last_modified);
     
     // 2. Format timestamps
-    char created_str[64], accessed_str[64];
-    struct tm* created_tm = localtime(&file_info->created_at);
-    struct tm* accessed_tm = localtime(&file_info->last_accessed);
-    
-    strftime(created_str, sizeof(created_str), "%Y-%m-%d %H:%M", created_tm);
-    strftime(accessed_str, sizeof(accessed_str), "%Y-%m-%d %H:%M", accessed_tm);
+    char created_str[64], accessed_str[64], modified_str[64];
+    struct tm created_tm, accessed_tm, modified_tm;
+
+    localtime_r(&file_info->created_at, &created_tm);
+    localtime_r(&file_info->last_accessed, &accessed_tm);
+    localtime_r(&file_info->last_modified, &modified_tm);
+
+    strftime(created_str, sizeof(created_str), "%Y-%m-%d %H:%M", &created_tm);
+    strftime(accessed_str, sizeof(accessed_str), "%Y-%m-%d %H:%M", &accessed_tm);
+    strftime(modified_str, sizeof(modified_str), "%Y-%m-%d %H:%M", &modified_tm);
+
+    // DEBUG: Print formatted strings
+    printf("[DEBUG][INFO] Formatted timestamps:\n");
+    printf("  - created_str: '%s'\n", created_str);
+    printf("  - accessed_str: '%s'\n", accessed_str);
+    printf("  - modified_str: '%s'\n", modified_str);
 
     char access_list[512];
     format_access_list(file_info, access_list, sizeof(access_list));
     
-
-
+    // 3. Format word and char counts
+    char words_str[20], chars_str[20], size_str[20];
+    if (file_info->word_count >= 0) {
+        snprintf(words_str, sizeof(words_str), "%d", file_info->word_count);
+    } else {
+        strcpy(words_str, "N/A");
+    }
     
-    // 3. Build response in the format client expects
+    if (file_info->char_count >= 0) {
+        snprintf(chars_str, sizeof(chars_str), "%d", file_info->char_count);
+    } else {
+        strcpy(chars_str, "N/A");
+    }
+
+    if (file_info->file_size >= 0) {
+        snprintf(size_str, sizeof(size_str), "%ld bytes", file_info->file_size);
+    } else {
+        strcpy(size_str, "N/A");
+    }
+
+    // 4. Build response in the format client expects
     char response[MAX_BUFFER_SIZE];
     snprintf(response, MAX_BUFFER_SIZE,
              "--> File: %s\n"
              "--> Owner: %s\n"
              "--> Created: %s\n"
              "--> Last Modified: %s\n"
-             "--> Size: N/A\n"
+             "--> Size: %s\n"
+             "--> Word Count: %s\n"
+             "--> Character Count: %s\n"
              "--> Access: %s\n"
              "--> Last Accessed: %s by %s",
              file_path,
              file_info->owner ? file_info->owner : "unknown",
              created_str,
-             created_str,  // Using created time as modified time (no separate field yet)
+             modified_str,
+             size_str,
+             words_str,
+             chars_str,
              access_list,
              accessed_str,
              file_info->owner ? file_info->owner : "unknown");
@@ -661,6 +708,8 @@ void handle_view_command(int client_fd, const char* flags, const char* username)
         
         for (i = 0; i < file_count && offset < MAX_BUFFER_SIZE - 200; i++) {
             FileInfo* file = files[i];
+
+            update_file_metadata(file->file_path);
             
             // Format last access time
             char time_str[32];
