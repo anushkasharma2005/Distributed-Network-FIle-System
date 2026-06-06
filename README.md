@@ -61,3 +61,7 @@ make run
 - Checkpointing
 - Hirarchical Storage folder structure
 - Novel: Restore until 5 minutes after delete
+
+## Contributers 
+- @anushkasharma2005 Anushka Sharma
+- @kiran-r-10 Kiran R 
