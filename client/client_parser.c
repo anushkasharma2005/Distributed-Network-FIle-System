@@ -316,6 +316,7 @@ int parse_command(const char *input, Command *cmd) {
         return SUCCESS;
     }
 
+    
     // Parse VIEWFOLDER command
     if (strcmp(command, "VIEWFOLDER") == 0) {
         cmd->type = MSG_VIEWFOLDER;
@@ -327,8 +328,116 @@ int parse_command(const char *input, Command *cmd) {
         return SUCCESS;
     }
 
+    // ADDED THESE NEW PARSERS:
+
+    // Parse REQUEST command
+    if (strcmp(command, "REQUEST") == 0) {
+        cmd->type = MSG_REQUEST_ACCESS;
+        
+        token = strtok(NULL, " \t");
+        if (!token) {
+            return ERR_INVALID_COMMAND;
+        }
+        strncpy(cmd->filename, token, MAX_FILENAME_LENGTH - 1);
+        
+        token = strtok(NULL, " \t");
+        if (!token || token[0] != '-') {
+            return ERR_INVALID_COMMAND;
+        }
+        
+        // Parse flag: -r or -w
+        if (token[1] == 'r' || token[1] == 'R') {
+            cmd->read_access = true;
+            cmd->write_access = false;
+        } else if (token[1] == 'w' || token[1] == 'W') {
+            cmd->read_access = false;
+            cmd->write_access = true;
+        } else {
+            return ERR_INVALID_COMMAND;
+        }
+        
+        return SUCCESS;
+    }
+
+    // Parse VIEWREQUESTS command
+    if (strcmp(command, "VIEWREQUESTS") == 0) {
+        cmd->type = MSG_VIEW_REQUESTS;
+        return SUCCESS;
+    }
+
+    // Parse APPROVE command
+    if (strcmp(command, "APPROVE") == 0) {
+        cmd->type = MSG_APPROVE_ACCESS;
+        
+        token = strtok(NULL, " \t");
+        if (!token) {
+            return ERR_INVALID_COMMAND;
+        }
+        strncpy(cmd->filename, token, MAX_FILENAME_LENGTH - 1);
+        
+        token = strtok(NULL, " \t");
+        if (!token) {
+            return ERR_INVALID_COMMAND;
+        }
+        strncpy(cmd->target_user, token, MAX_USERNAME_LENGTH - 1);
+        
+        token = strtok(NULL, " \t");
+        if (!token || token[0] != '-') {
+            return ERR_INVALID_COMMAND;
+        }
+        
+        // Parse flag
+        if (token[1] == 'r' || token[1] == 'R') {
+            cmd->read_access = true;
+            cmd->write_access = false;
+        } else if (token[1] == 'w' || token[1] == 'W') {
+            cmd->read_access = false;
+            cmd->write_access = true;
+        } else {
+            return ERR_INVALID_COMMAND;
+        }
+        
+        return SUCCESS;
+    }
+
+    // Parse REJECT command
+    if (strcmp(command, "REJECT") == 0) {
+        cmd->type = MSG_REJECT_ACCESS;
+        
+        token = strtok(NULL, " \t");
+        if (!token) {
+            return ERR_INVALID_COMMAND;
+        }
+        strncpy(cmd->filename, token, MAX_FILENAME_LENGTH - 1);
+        
+        token = strtok(NULL, " \t");
+        if (!token) {
+            return ERR_INVALID_COMMAND;
+        }
+        strncpy(cmd->target_user, token, MAX_USERNAME_LENGTH - 1);
+        
+        token = strtok(NULL, " \t");
+        if (!token || token[0] != '-') {
+            return ERR_INVALID_COMMAND;
+        }
+        
+        // Parse flag
+        if (token[1] == 'r' || token[1] == 'R') {
+            cmd->read_access = true;
+            cmd->write_access = false;
+        } else if (token[1] == 'w' || token[1] == 'W') {
+            cmd->read_access = false;
+            cmd->write_access = true;
+        } else {
+            return ERR_INVALID_COMMAND;
+        }
+        
+        return SUCCESS;
+    }
+
     return ERR_INVALID_COMMAND;
 }
+
 
 void print_error(int error_code) {
     switch (error_code) {

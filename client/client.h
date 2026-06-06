@@ -52,6 +52,10 @@
 #define MSG_MOVE 19
 #define MSG_VIEWFOLDER 20
 #define MSG_RESTORE 21  
+#define MSG_REQUEST_ACCESS 22
+#define MSG_VIEW_REQUESTS 23
+#define MSG_APPROVE_ACCESS 24
+#define MSG_REJECT_ACCESS 25
 
 // Client structure
 typedef struct
@@ -72,6 +76,7 @@ typedef struct
     char filename[MAX_FILENAME_LENGTH];
     char username[MAX_USERNAME_LENGTH];
     char content[MAX_BUFFER_SIZE];
+    char target_user[MAX_USERNAME_LENGTH];
     int sentence_num;
     int word_index;
     bool flag_all;
@@ -114,7 +119,10 @@ int cmd_createfolder(Client *client, const char *folderpath);
 int cmd_move(Client *client, const char *filename, const char *folderpath);
 int cmd_viewfolder(Client *client, const char *folderpath);
 int cmd_restore(Client *client, const char *filename);
-
+int cmd_request_access(Client *client, const char *filename, const char *access_type);
+int cmd_view_requests(Client *client);
+int cmd_approve_request(Client *client, const char *filename, const char *username, const char *access_type);
+int cmd_reject_request(Client *client, const char *filename, const char *username, const char *access_type);
 
 // Helper functions
 int send_to_nm(Client *client, const void *data, size_t len);

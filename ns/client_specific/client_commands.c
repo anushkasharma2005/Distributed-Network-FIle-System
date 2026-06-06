@@ -10,6 +10,7 @@
 #include "../registry/file_registry.h"
 #include "../registry/ss_registry.h"
 #include "../registry/user_registry.h"
+#include "../registry/access_request_registry.h"
 #include "../../api_c_ns/networking.h"
 #include "./handle_client_server.h"
 #include "../../api_c_ss/client_ss_connection.h" 
@@ -59,6 +60,12 @@
         return;
     }
 
+    if (strcmp(command, "VIEWREQUESTS") == 0) {
+        // printf("[DEBUG] About to call handle_viewrequests_command for user '%s'\n", username); 
+        handle_viewrequests_command(client_fd, username);
+        // printf("[DEBUG] Returned from handle_viewrequests_command\n");
+        return;
+    }
 
     if (parsed < 2) {
         const char* error = "ERROR: Invalid command format";
@@ -100,6 +107,7 @@
 
         // If the request is CREATE then handle create command
         handle_create_command(client_fd, file_path,username);
+        return;
 
     }else if (strcmp(command, "WRITE_LOCK") == 0) {
 
@@ -110,6 +118,7 @@
         }
 
         handle_write_command(client_fd, file_path);
+        return;
 
     }else if (strcmp(command, "VIEW") == 0) {
         // Client sends: "VIEW flag_all flag_list"
@@ -135,6 +144,7 @@
 
         // If the request is INFO then handle file operation command. 
         handle_info_command(client_fd, file_path);
+        return;
 
     }else if (strcmp(command, "DELETE") == 0) {
         // Only owner can delete
@@ -143,12 +153,15 @@
             return;
         }
         handle_delete_command(client_fd, file_path, username);  // CHANGED
+        return;
+
     } else if (strcmp(command, "RESTORE") == 0) { 
         if (!is_file_owner(file_path, username)) {
             send_message(client_fd, "ERROR: Only file owner can restore");
             return;
         }
         handle_restore_command(client_fd, file_path, username);
+        return;
 
     }else if (strcmp(command, "READ") == 0 || 
                strcmp(command, "STREAM") == 0) {
@@ -161,6 +174,8 @@
 
         // If the request is READ/STREAM then handle file operation command. 
         handle_file_operation_command(client_fd, file_path, command);
+        return;
+
     }else if ( strcmp(command, "UNDO") == 0) {
 
         if (!has_write_access(file_path, username)) {
@@ -170,6 +185,8 @@
         }
         
         handle_file_operation_command(client_fd, file_path, command);
+        return;
+
     }else if (strcmp(command, "EXEC") == 0) {
     
         if (!has_read_access(file_path, username)) {
@@ -178,10 +195,44 @@
             return;
         }
         handle_exec_command(client_fd, file_path, username);
-    }else {
-        const char* response = "ERROR: Unknown command";
-        send_message(client_fd, response);
+    } else if (strcmp(command, "REQUEST") == 0) {
+        if (parsed < 3) {
+            send_message(client_fd, "ERROR: Usage: REQUEST <file> <-r|-w>");
+            return;
+        }
+        const char* filename = arg1;
+        const char* flag = arg2;
+        const char* access_type = (strcmp(flag, "-r") == 0) ? "READ" : "WRITE";
+        handle_request_command(client_fd, filename, username, access_type);
+        return;
+        
+    }else if (strcmp(command, "APPROVE") == 0) {
+        if (parsed < 4) {
+            send_message(client_fd, "ERROR: Usage: APPROVE <file> <user> <-r|-w>");
+            return;
+        }
+        const char* filename = arg1;
+        const char* target_user = arg2;
+        const char* flag = arg3;
+        const char* access_type = (strcmp(flag, "-r") == 0) ? "READ" : "WRITE";
+        handle_approve_command(client_fd, filename, target_user, access_type, username);
+        return;
     }
+    else if (strcmp(command, "REJECT") == 0) {
+        if (parsed < 4) {
+            send_message(client_fd, "ERROR: Usage: REJECT <file> <user> <-r|-w>");
+            return;
+        }
+        const char* filename = arg1;
+        const char* target_user = arg2;
+        const char* flag = arg3;
+        const char* access_type = (strcmp(flag, "-r") == 0) ? "READ" : "WRITE";
+        handle_reject_command(client_fd, filename, target_user, access_type, username);
+        return;  
+    }else {
+            const char* response = "ERROR: Unknown command";
+            send_message(client_fd, response);
+        }
 }
 
 
@@ -644,6 +695,8 @@ void handle_addaccess_command(int client_fd, const char* file_path,
     }
     
     if (result == 0) {
+        clear_pending_request(file_path, username, access_type == 'R' ? "READ" : "WRITE");
+        
         char response[256];
         snprintf(response, sizeof(response), 
                 "SUCCESS: %s access granted to %s for '%s'",
@@ -1391,5 +1444,146 @@ void handle_restore_command(int client_fd, const char* file_path, const char* us
         send_message(client_fd, "ERROR: Cannot restore - file deletion expired");
     } else {
         send_message(client_fd, "ERROR: Failed to restore file");
+    }
+}
+
+
+/**
+ * Handle REQUEST command
+ */
+void handle_request_command(int client_fd, const char* file_path,
+                           const char* requester, const char* access_type) {
+    printf("[NS-Client][REQUEST] User '%s' requesting %s access to '%s'\n",
+           requester, access_type, file_path);
+    
+    FileInfo* file = find_file(file_path);
+    if (!file || !file->is_active) {
+        send_message(client_fd, "ERROR: File not found");
+        return;
+    }
+    
+    // Check if already owner
+    if (strcmp(file->owner, requester) == 0) {
+        send_message(client_fd, "ERROR: You are the owner");
+        return;
+    }
+    
+    // Check if already has access
+    if ((strcmp(access_type, "READ") == 0 && has_read_access(file_path, requester)) ||
+        (strcmp(access_type, "WRITE") == 0 && has_write_access(file_path, requester))) {
+        send_message(client_fd, "ERROR: You already have this access");
+        return;
+    }
+    
+    // Check for duplicate request
+    if (request_exists(file_path, requester, access_type)) {
+        send_message(client_fd, "ERROR: Request already pending");
+        return;
+    }
+    
+    // Create request
+    int result = create_access_request(file_path, requester, file->owner, access_type);
+    
+    if (result == 0) {
+        char response[256];
+        snprintf(response, sizeof(response),
+                 "SUCCESS: Request sent to owner '%s'. Waiting for approval.", file->owner);
+        send_message(client_fd, response);
+    } else {
+        send_message(client_fd, "ERROR: Failed to create request");
+    }
+}
+
+/**
+ * Handle VIEWREQUESTS command
+ */
+void handle_viewrequests_command(int client_fd, const char* owner) {
+    printf("[DEBUG] ========== ENTERED handle_viewrequests_command ==========\n");
+    printf("[NS-Client][VIEWREQUESTS] User '%s' viewing pending requests\n", owner);
+    
+    AccessRequest* requests[MAX_FILES];
+    int count = get_pending_requests_for_owner(owner, requests, MAX_FILES);
+    
+    if (count == 0) {
+        send_message(client_fd, "No pending access requests");
+        return;
+    }
+    
+    char response[MAX_BUFFER_SIZE];
+    int offset = 0;
+    
+    offset += snprintf(response + offset, MAX_BUFFER_SIZE - offset,
+                      "Pending Access Requests for your files:\n");
+    offset += snprintf(response + offset, MAX_BUFFER_SIZE - offset,
+                      "─────────────────────────────────────────\n");
+    
+    for (int i = 0; i < count && offset < MAX_BUFFER_SIZE - 200; i++) {
+        const char* flag = (strcmp(requests[i]->access_type, "READ") == 0) ? "-r" : "-w";
+        
+        offset += snprintf(response + offset, MAX_BUFFER_SIZE - offset,
+                          "%d. File: %s\n", i + 1, requests[i]->file_path);
+        offset += snprintf(response + offset, MAX_BUFFER_SIZE - offset,
+                          "   User: %s\n", requests[i]->requester);
+        offset += snprintf(response + offset, MAX_BUFFER_SIZE - offset,
+                          "   Type: %s\n", flag);
+        
+        struct tm* tm = localtime(&requests[i]->requested_at);
+        char time_str[64];
+        strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M", tm);
+        offset += snprintf(response + offset, MAX_BUFFER_SIZE - offset,
+                          "   Time: %s\n\n", time_str);
+    }
+    
+    offset += snprintf(response + offset, MAX_BUFFER_SIZE - offset,
+                      "─────────────────────────────────────────");
+    
+    send_message(client_fd, response);
+}
+
+/**
+ * Handle APPROVE command
+ */
+void handle_approve_command(int client_fd, const char* file_path,
+                           const char* username, const char* access_type,
+                           const char* owner) {
+    printf("[NS-Client][APPROVE] Owner '%s' approving %s's %s request for '%s'\n",
+           owner, username, access_type, file_path);
+    
+    // Check if owner
+    if (!is_file_owner(file_path, owner)) {
+        send_message(client_fd, "ERROR: Only the owner can approve requests");
+        return;
+    }
+    
+    int result = approve_access_request(file_path, username, access_type);
+    
+    if (result == 0) {
+        send_message(client_fd, "SUCCESS: Access granted");
+    } else {
+        send_message(client_fd, "ERROR: Request not found or already processed");
+    }
+}
+
+/**
+ * Handle REJECT command
+ */
+void handle_reject_command(int client_fd, const char* file_path,
+                          const char* username, const char* access_type,
+                          const char* owner) {
+    printf("[NS-Client][REJECT] Owner '%s' rejecting %s's %s request for '%s'\n",
+           owner, username, access_type, file_path);
+    
+    // Check if owner
+    if (!is_file_owner(file_path, owner)) {
+        send_message(client_fd, "ERROR: Only the owner can reject requests");
+        return;
+    }
+    
+    int result = reject_access_request(file_path, username, access_type);
+    
+    if (result == 0) {
+        send_message(client_fd, "SUCCESS: Request rejected");
+    } else {
+        send_message(client_fd, "ERROR: Request not found");
     }
 }
